@@ -142,19 +142,21 @@ class FOMAMLTrainer:
         self,
         support_data: Tuple,
         pred_length: int,
-    ) -> Tuple[Dict[str, torch.Tensor], List[float]]:
+    ) -> Tuple[Dict[str, torch.Tensor], List[torch.Tensor]]:
         """
         Run inner loop adaptation on support set.
 
-        Uses manual gradient descent (not SGD optimizer) to properly handle
-        first-order MAML updates.
+        Note: Due to the cloning mechanism, the inner loop gradients w.r.t. fast_params
+        are disconnected from the computation graph. However, the inner_losses ARE
+        connected to the model's parameters, so we return them as tensors to include
+        in the meta_loss for training signal.
 
         Args:
             support_data: (input_list, target_list, info_list) for support set
             pred_length: Number of prediction steps
 
         Returns:
-            (adapted_params, inner_losses) - adapted parameters and loss history
+            (adapted_params, inner_losses) - adapted parameters and loss history (as tensors)
         """
         inner_losses = []
 
@@ -172,9 +174,9 @@ class FOMAMLTrainer:
             # Set the fast params in the model temporarily
             self.set_params(fast_params)
 
-            # Compute loss
+            # Compute loss - keep as tensor for meta-loss gradient flow
             loss = self.compute_loss(support_data, pred_length)
-            inner_losses.append(loss.item())
+            inner_losses.append(loss)  # Keep as tensor, not .item()
 
             # Compute gradients manually
             # For FOMAML: create_graph=False (first-order only)
@@ -244,17 +246,22 @@ class FOMAMLTrainer:
                 continue
 
             # Inner loop: Adapt embeddings on support set
-            # Returns adapted params and loss history
+            # Returns adapted params and loss history (tensors for gradient flow)
             fast_params, inner_losses = self.inner_loop(support_data, pred_length)
-            all_inner_losses.extend(inner_losses)
+            all_inner_losses.extend([l.item() for l in inner_losses])  # Store as floats for logging
 
             # Evaluate on query set with adapted embeddings
             # The model already has adapted params set by inner_loop
             query_loss = self.compute_loss(query_data, pred_length)
             all_query_losses.append(query_loss.item())
 
+            # Compute session meta-loss: query loss + weighted inner losses
+            # This ensures gradient signal from both support and query data
+            avg_inner_loss = sum(inner_losses) / len(inner_losses) if inner_losses else torch.tensor(0.0, device=DEVICE)
+            session_meta_loss = query_loss + 0.1 * avg_inner_loss  # Same weighting as E2E-TTT
+
             # Accumulate meta loss
-            meta_loss = meta_loss + query_loss
+            meta_loss = meta_loss + session_meta_loss
             valid_sessions += 1
 
             # Restore original embeddings for next session
@@ -343,7 +350,8 @@ class FOMAMLTrainer:
         self.inner_steps = orig_inner_steps
         self.inner_lr = orig_inner_lr
 
-        return adaptation_losses
+        # Convert tensors to floats for return
+        return [l.item() if hasattr(l, 'item') else l for l in adaptation_losses]
 
     def evaluate_with_adaptation(
         self,

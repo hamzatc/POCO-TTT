@@ -234,36 +234,36 @@ meta_loss = (1/N) * sum(query_loss_i for i in sessions)
 
 ## Hyperparameters
 
-### Common Settings
+### Common Settings (All Methods)
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `batch_size` | 64 | Samples per batch |
 | `max_batch` | 10000 | Total training iterations |
-| `lr` | 1e-4 | Learning rate |
+| `lr` / `meta_lr` | 1e-4 | Learning rate |
 | `hidden_dim` | 512 | Model hidden dimension |
 | `num_layers` | 2 | Perceiver processor layers |
 | `num_latents` | 64 | Number of latent vectors |
 
-### FOMAML-Specific
+### POCO Baseline
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
+| `batch_size` | 64 | Samples per batch (default) |
+
+### FOMAML & E2E-TTT (Aligned)
+
+Both meta-learning methods use identical hyperparameters for fair comparison:
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `batch_size` | 32 | Samples per batch (reduced for meta-learning) |
 | `meta_lr` | 1e-4 | Outer loop learning rate |
 | `inner_lr` | 1e-3 | Inner loop learning rate |
 | `inner_steps` | 3 | Adaptation steps per session |
 | `meta_batch_size` | 2 | Sessions per meta-batch |
 | `support_ratio` | 0.7 | Support/query split ratio |
 
-### E2E-TTT-Specific
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `meta_lr` | 1e-4 | Outer loop learning rate |
-| `inner_lr` | 1e-3 | Inner loop learning rate |
-| `inner_steps` | 2 | Adaptation steps (reduced for memory) |
-| `meta_batch_size` | 1 | Sessions per meta-batch (reduced for memory) |
-| `use_second_order` | True | Enable computation graph through inner loop |
+**Key difference:** E2E-TTT uses `use_second_order=True` (create_graph=True) for second-order gradients.
 
 ## Objective
 

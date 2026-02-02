@@ -1008,15 +1008,16 @@ def fomaml_multi_species():
     config = FOMAMLConfig()
     config.experiment_name = 'fomaml_multi_species'
 
-    # FOMAML-specific settings
+    # FOMAML-specific settings (aligned with E2E-TTT for fair comparison)
     config.training_mode = 'fomaml'
     config.meta_lr = 1e-4
     config.inner_lr = 1e-3
-    config.inner_steps = 3  # Reduced from 5 for faster training
-    config.meta_batch_size = 2  # Reduced from 4 for faster training
+    config.inner_steps = 3  # Same as E2E-TTT
+    config.meta_batch_size = 2  # Same as E2E-TTT
     config.support_ratio = 0.7
     config.adaptation_steps = 10
     config.adaptation_lr = 1e-3
+    config.batch_size = 32  # Same as E2E-TTT
 
     # Training settings
     config.max_batch = 10000
@@ -1133,17 +1134,17 @@ def e2e_ttt_multi_species():
     config = E2ETTTConfig()
     config.experiment_name = 'e2e_ttt_multi_species'
 
-    # E2E-TTT specific settings
+    # E2E-TTT specific settings (aligned with FOMAML for fair comparison)
     config.training_mode = 'e2e_ttt'
     config.meta_lr = 1e-4
     config.inner_lr = 1e-3
-    config.inner_steps = 2  # Reduced for memory
-    config.meta_batch_size = 1  # Reduced for memory
+    config.inner_steps = 3  # Same as FOMAML
+    config.meta_batch_size = 2  # Same as FOMAML
     config.support_ratio = 0.7
     config.use_second_order = True
     config.adaptation_steps = 10
     config.adaptation_lr = 1e-3
-    config.batch_size = 32  # Reduced batch size for memory
+    config.batch_size = 32  # Same as FOMAML
 
     # Training settings
     config.max_batch = 10000

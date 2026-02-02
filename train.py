@@ -9,8 +9,8 @@ import torch.optim.lr_scheduler as lrs
 import time
 
 from configs.config_global import LOG_LEVEL, NP_SEED, TCH_SEED, USE_CUDA, DATA_DIR
-from configs.configs import BaseConfig, SupervisedLearningBaseConfig, NeuralPredictionConfig
-from datasets.dataloader import DatasetIters
+from configs.configs import BaseConfig, SupervisedLearningBaseConfig, NeuralPredictionConfig, FOMAMLConfig
+from datasets.dataloader import DatasetIters, SessionDatasetIters
 from tasks.taskfunctions import TaskFunction
 from models.model_utils import model_init
 from utils.config_utils import load_config
@@ -120,10 +120,18 @@ def get_full_input(batch, dataset_idx, config: NeuralPredictionConfig, input_siz
 
 def model_train(config: NeuralPredictionConfig):
     """
-    The main training function. 
+    The main training function.
     This function initializes the task, dataset, network, optimizer, and learning rate scheduler.
     It then trains the network and logs the performance.
     """
+
+    # Route to FOMAML training if configured
+    if hasattr(config, 'training_mode') and config.training_mode == 'fomaml':
+        return fomaml_train(config)
+
+    # Route to E2E-TTT training if configured
+    if hasattr(config, 'training_mode') and config.training_mode == 'e2e_ttt':
+        return e2e_ttt_train(config)
 
     total_train_time = 0.0
     start_time = time.time()
@@ -138,9 +146,10 @@ def model_train(config: NeuralPredictionConfig):
     if USE_CUDA:
         logging.info("training with GPU")
 
-    # initialize logger
+    # initialize logger with wandb support
     logger = Logger(output_dir=config.save_path,
-                    exp_name=config.experiment_name)
+                    exp_name=config.experiment_name,
+                    config=config)
 
     # initialize dataset
     train_data = DatasetIters(config, 'train')
@@ -266,3 +275,484 @@ def model_eval(config: SupervisedLearningBaseConfig):
     logger = Logger(output_dir=config.save_path, output_fname='test.txt', exp_name=config.experiment_name)
     evaluate_performance(net, config, test_data, task_func, logger, testing=True)
     logger.dump_tabular()
+
+
+def fomaml_train(config: FOMAMLConfig):
+    """
+    Meta-training using FOMAML (First-Order MAML).
+
+    This training mode learns a backbone that can quickly adapt to new sessions
+    via test-time training on embeddings.
+    """
+    from poco_ttt.fomaml_trainer import FOMAMLTrainer
+
+    total_train_time = 0.0
+    start_time = time.time()
+
+    np.random.seed(NP_SEED + config.seed)
+    torch.manual_seed(TCH_SEED + config.seed)
+    random.seed(config.seed)
+    torch.hub.set_dir(osp.join(DATA_DIR, 'torch_hub'))
+    train_start_time = datetime.now()
+
+    if USE_CUDA:
+        logging.info("FOMAML training with GPU")
+
+    # Initialize logger with wandb support
+    logger = Logger(output_dir=config.save_path, exp_name=config.experiment_name, config=config)
+
+    # Initialize session-level dataset iterators
+    train_data = SessionDatasetIters(config, 'train')
+    val_data = SessionDatasetIters(config, 'val')
+
+    logging.info(f"FOMAML training with {train_data.num_sessions} training sessions")
+    logging.info(f"Meta batch size: {config.meta_batch_size}, Inner steps: {config.inner_steps}")
+
+    # Initialize model
+    net = model_init(config, train_data.input_sizes, train_data.unit_types)
+    param_count = sum(p.numel() for p in net.parameters() if p.requires_grad)
+    logging.info(f'Model: {config.model_type}, Total parameters: {param_count}')
+
+    # Get backbone parameters for meta-optimizer
+    backbone_params = net.get_backbone_params() if hasattr(net, 'get_backbone_params') else net.parameters()
+
+    # Initialize meta-optimizer (for backbone)
+    if config.optimizer_type == 'Adam':
+        meta_optimizer = torch.optim.Adam(backbone_params, lr=config.meta_lr, weight_decay=config.wdecay)
+    elif config.optimizer_type == 'AdamW':
+        meta_optimizer = torch.optim.AdamW(backbone_params, lr=config.meta_lr, weight_decay=config.wdecay, amsgrad=True)
+    else:
+        meta_optimizer = torch.optim.SGD(backbone_params, lr=config.meta_lr, weight_decay=config.wdecay)
+
+    # Initialize FOMAML trainer
+    trainer = FOMAMLTrainer(net, config, meta_optimizer)
+
+    # Learning rate scheduler for meta-optimizer
+    if config.use_lr_scheduler:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            meta_optimizer,
+            T_max=config.max_batch // config.log_every + 1,
+            eta_min=config.meta_lr / 20
+        )
+
+    # Training loop
+    i_b = 0
+    val_losses = []
+    train_loss_accum = 0.0
+
+    def get_session_data(session_id):
+        """Helper function to get support/query data for a session"""
+        support_samples, query_samples = train_data.get_support_query_split(session_id)
+        if len(support_samples) == 0 or len(query_samples) == 0:
+            return None, None
+        support_batch = train_data.create_batch_from_data(support_samples, session_id)
+        query_batch = train_data.create_batch_from_data(query_samples, session_id)
+        return support_batch, query_batch
+
+    logging.info("Starting FOMAML training...")
+
+    while i_b < config.max_batch:
+        net.train()
+
+        # Sample meta-batch of sessions
+        session_ids = train_data.sample_meta_batch(config.meta_batch_size)
+
+        # Meta-training step
+        stats = trainer.meta_train_step(
+            session_data_fn=get_session_data,
+            session_ids=session_ids,
+            pred_length=config.pred_length,
+        )
+
+        train_loss_accum += stats['meta_loss']
+        i_b += 1
+
+        # Save model periodically
+        if i_b % config.save_every == 0:
+            torch.save(net.state_dict(), osp.join(config.save_path, f'net_{i_b}.pth'))
+
+        # Log performance
+        if i_b % config.log_every == 0:
+            logger.log_tabular('BatchNum', i_b)
+            logger.log_tabular('MetaLoss', train_loss_accum / config.log_every)
+            logger.log_tabular('AvgInnerLoss', stats['avg_inner_loss'])
+            logger.log_tabular('AvgQueryLoss', stats['avg_query_loss'])
+
+            # Evaluate on validation set with adaptation
+            val_loss = evaluate_fomaml(net, trainer, val_data, config)
+            logger.log_tabular('ValLoss', val_loss)
+            val_losses.append(val_loss)
+
+            # Save best model
+            if val_loss <= min(val_losses):
+                torch.save(net.state_dict(), osp.join(config.save_path, 'net_best.pth'))
+                logging.info(f"  New best model at step {i_b}, val_loss: {val_loss:.6f}")
+
+            logger.dump_tabular()
+            train_loss_accum = 0.0
+
+            if config.use_lr_scheduler:
+                scheduler.step()
+
+    total_train_time = time.time() - start_time
+    logging.info(f'Total FOMAML training time: {total_train_time / 60:.2f} mins')
+
+    # Save final model
+    torch.save(net.state_dict(), osp.join(config.save_path, f'net_{i_b}.pth'))
+
+    log_complete(config.save_path, train_start_time)
+
+    if config.perform_test:
+        fomaml_eval(config)
+
+
+def evaluate_fomaml(
+    net: nn.Module,
+    trainer,
+    val_data: SessionDatasetIters,
+    config: FOMAMLConfig,
+) -> float:
+    """
+    Evaluate FOMAML model on validation set with test-time adaptation.
+
+    For each session:
+    1. Split into support/query
+    2. Adapt on support
+    3. Evaluate on query
+
+    Returns average query loss after adaptation.
+    """
+    net.eval()
+    total_loss = 0.0
+    num_sessions = 0
+
+    for session_id in range(val_data.num_sessions):
+        if session_id not in val_data.session_indices:
+            continue
+        if len(val_data.session_indices[session_id]) < 2:
+            continue
+
+        # Get support/query split
+        support_samples, query_samples = val_data.get_support_query_split(session_id)
+        if len(support_samples) == 0 or len(query_samples) == 0:
+            continue
+
+        support_batch = val_data.create_batch_from_data(support_samples, session_id)
+        query_batch = val_data.create_batch_from_data(query_samples, session_id)
+
+        if support_batch is None or query_batch is None:
+            continue
+
+        # Evaluate with adaptation
+        result = trainer.evaluate_with_adaptation(
+            support_batch, query_batch, config.pred_length
+        )
+        total_loss += result['post_adapt_loss']
+        num_sessions += 1
+
+    if num_sessions == 0:
+        return float('inf')
+
+    return total_loss / num_sessions
+
+
+def fomaml_eval(config: FOMAMLConfig):
+    """Evaluate FOMAML model on test set with test-time adaptation."""
+    from poco_ttt.fomaml_trainer import FOMAMLTrainer
+
+    np.random.seed(NP_SEED)
+    torch.manual_seed(TCH_SEED)
+    random.seed(config.seed)
+
+    # Load test data
+    test_data = SessionDatasetIters(config, 'test')
+
+    # Initialize model and load weights
+    net = model_init(config, test_data.input_sizes, test_data.unit_types)
+    net.load_state_dict(torch.load(osp.join(config.save_path, 'net_best.pth'), weights_only=True))
+
+    # Create dummy optimizer for trainer (not used during eval)
+    dummy_optimizer = torch.optim.SGD(net.parameters(), lr=0.0)
+    trainer = FOMAMLTrainer(net, config, dummy_optimizer)
+
+    # Evaluate
+    logger = Logger(output_dir=config.save_path, output_fname='test_fomaml.txt', exp_name=config.experiment_name)
+
+    total_pre_adapt = 0.0
+    total_post_adapt = 0.0
+    num_sessions = 0
+
+    for session_id in range(test_data.num_sessions):
+        if session_id not in test_data.session_indices:
+            continue
+        if len(test_data.session_indices[session_id]) < 2:
+            continue
+
+        support_samples, query_samples = test_data.get_support_query_split(session_id)
+        if len(support_samples) == 0 or len(query_samples) == 0:
+            continue
+
+        support_batch = test_data.create_batch_from_data(support_samples, session_id)
+        query_batch = test_data.create_batch_from_data(query_samples, session_id)
+
+        if support_batch is None or query_batch is None:
+            continue
+
+        result = trainer.evaluate_with_adaptation(
+            support_batch, query_batch, config.pred_length
+        )
+
+        total_pre_adapt += result['pre_adapt_loss']
+        total_post_adapt += result['post_adapt_loss']
+        num_sessions += 1
+
+    if num_sessions > 0:
+        avg_pre = total_pre_adapt / num_sessions
+        avg_post = total_post_adapt / num_sessions
+        improvement = (avg_pre - avg_post) / avg_pre * 100
+
+        logger.log_tabular('NumSessions', num_sessions)
+        logger.log_tabular('PreAdaptLoss', avg_pre)
+        logger.log_tabular('PostAdaptLoss', avg_post)
+        logger.log_tabular('Improvement%', improvement)
+        logger.dump_tabular()
+
+        logging.info(f"FOMAML Test Results:")
+        logging.info(f"  Sessions evaluated: {num_sessions}")
+        logging.info(f"  Pre-adaptation loss: {avg_pre:.6f}")
+        logging.info(f"  Post-adaptation loss: {avg_post:.6f}")
+        logging.info(f"  Improvement: {improvement:.2f}%")
+
+
+def e2e_ttt_train(config):
+    """
+    Meta-training using E2E-TTT (End-to-End Test-Time Training).
+
+    This training mode uses full second-order gradients (create_graph=True)
+    to learn initialization that is optimized for post-adaptation performance.
+    """
+    from poco_ttt.e2e_ttt_trainer import E2ETTTTrainer
+
+    total_train_time = 0.0
+    start_time = time.time()
+
+    np.random.seed(NP_SEED + config.seed)
+    torch.manual_seed(TCH_SEED + config.seed)
+    random.seed(config.seed)
+    torch.hub.set_dir(osp.join(DATA_DIR, 'torch_hub'))
+    train_start_time = datetime.now()
+
+    if USE_CUDA:
+        logging.info("E2E-TTT training with GPU")
+
+    # Initialize logger with wandb support
+    logger = Logger(output_dir=config.save_path, exp_name=config.experiment_name, config=config)
+
+    # Initialize session-level dataset iterators
+    train_data = SessionDatasetIters(config, 'train')
+    val_data = SessionDatasetIters(config, 'val')
+
+    logging.info(f"E2E-TTT training with {train_data.num_sessions} training sessions")
+    logging.info(f"Meta batch size: {config.meta_batch_size}, Inner steps: {config.inner_steps}")
+    logging.info(f"Using second-order gradients (create_graph=True)")
+
+    # Initialize model
+    net = model_init(config, train_data.input_sizes, train_data.unit_types)
+    param_count = sum(p.numel() for p in net.parameters() if p.requires_grad)
+    logging.info(f'Model: {config.model_type}, Total parameters: {param_count}')
+
+    # For E2E-TTT, we optimize all parameters in the meta-optimizer
+    # since gradients flow through the inner loop
+    meta_optimizer = torch.optim.Adam(net.parameters(), lr=config.meta_lr, weight_decay=config.wdecay)
+
+    # Initialize E2E-TTT trainer
+    trainer = E2ETTTTrainer(net, config, meta_optimizer)
+
+    # Learning rate scheduler for meta-optimizer
+    if config.use_lr_scheduler:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            meta_optimizer,
+            T_max=config.max_batch // config.log_every + 1,
+            eta_min=config.meta_lr / 20
+        )
+
+    # Training loop
+    i_b = 0
+    val_losses = []
+    train_loss_accum = 0.0
+
+    def get_session_data(session_id):
+        """Helper function to get support/query data for a session"""
+        support_samples, query_samples = train_data.get_support_query_split(session_id)
+        if len(support_samples) == 0 or len(query_samples) == 0:
+            return None, None
+        support_batch = train_data.create_batch_from_data(support_samples, session_id)
+        query_batch = train_data.create_batch_from_data(query_samples, session_id)
+        return support_batch, query_batch
+
+    logging.info("Starting E2E-TTT training...")
+
+    while i_b < config.max_batch:
+        net.train()
+
+        # Sample meta-batch of sessions
+        session_ids = train_data.sample_meta_batch(config.meta_batch_size)
+
+        # Meta-training step with second-order gradients
+        stats = trainer.meta_train_step(
+            session_data_fn=get_session_data,
+            session_ids=session_ids,
+            pred_length=config.pred_length,
+        )
+
+        train_loss_accum += stats['meta_loss']
+        i_b += 1
+
+        # Save model periodically
+        if i_b % config.save_every == 0:
+            torch.save(net.state_dict(), osp.join(config.save_path, f'net_{i_b}.pth'))
+
+        # Log performance
+        if i_b % config.log_every == 0:
+            logger.log_tabular('BatchNum', i_b)
+            logger.log_tabular('MetaLoss', train_loss_accum / config.log_every)
+            logger.log_tabular('AvgInnerLoss', stats['avg_inner_loss'])
+            logger.log_tabular('AvgQueryLoss', stats['avg_query_loss'])
+
+            # Evaluate on validation set with adaptation
+            val_loss = evaluate_e2e_ttt(net, trainer, val_data, config)
+            logger.log_tabular('ValLoss', val_loss)
+            val_losses.append(val_loss)
+
+            # Save best model
+            if val_loss <= min(val_losses):
+                torch.save(net.state_dict(), osp.join(config.save_path, 'net_best.pth'))
+                logging.info(f"  New best model at step {i_b}, val_loss: {val_loss:.6f}")
+
+            logger.dump_tabular()
+            train_loss_accum = 0.0
+
+            if config.use_lr_scheduler:
+                scheduler.step()
+
+    total_train_time = time.time() - start_time
+    logging.info(f'Total E2E-TTT training time: {total_train_time / 60:.2f} mins')
+
+    # Save final model
+    torch.save(net.state_dict(), osp.join(config.save_path, f'net_{i_b}.pth'))
+
+    log_complete(config.save_path, train_start_time)
+
+    if config.perform_test:
+        e2e_ttt_eval(config)
+
+
+def evaluate_e2e_ttt(
+    net: nn.Module,
+    trainer,
+    val_data: SessionDatasetIters,
+    config,
+) -> float:
+    """
+    Evaluate E2E-TTT model on validation set with test-time adaptation.
+    """
+    net.eval()
+    total_loss = 0.0
+    num_sessions = 0
+
+    for session_id in range(val_data.num_sessions):
+        if session_id not in val_data.session_indices:
+            continue
+        if len(val_data.session_indices[session_id]) < 2:
+            continue
+
+        # Get support/query split
+        support_samples, query_samples = val_data.get_support_query_split(session_id)
+        if len(support_samples) == 0 or len(query_samples) == 0:
+            continue
+
+        support_batch = val_data.create_batch_from_data(support_samples, session_id)
+        query_batch = val_data.create_batch_from_data(query_samples, session_id)
+
+        if support_batch is None or query_batch is None:
+            continue
+
+        # Evaluate with adaptation
+        result = trainer.evaluate_with_adaptation(
+            support_batch, query_batch, config.pred_length
+        )
+        total_loss += result['post_adapt_loss']
+        num_sessions += 1
+
+    if num_sessions == 0:
+        return float('inf')
+
+    return total_loss / num_sessions
+
+
+def e2e_ttt_eval(config):
+    """Evaluate E2E-TTT model on test set with test-time adaptation."""
+    from poco_ttt.e2e_ttt_trainer import E2ETTTTrainer
+
+    np.random.seed(NP_SEED)
+    torch.manual_seed(TCH_SEED)
+    random.seed(config.seed)
+
+    # Load test data
+    test_data = SessionDatasetIters(config, 'test')
+
+    # Initialize model and load weights
+    net = model_init(config, test_data.input_sizes, test_data.unit_types)
+    net.load_state_dict(torch.load(osp.join(config.save_path, 'net_best.pth'), weights_only=True))
+
+    # Create dummy optimizer for trainer (not used during eval)
+    dummy_optimizer = torch.optim.SGD(net.parameters(), lr=0.0)
+    trainer = E2ETTTTrainer(net, config, dummy_optimizer)
+
+    # Evaluate
+    logger = Logger(output_dir=config.save_path, output_fname='test_e2e_ttt.txt', exp_name=config.experiment_name)
+
+    total_pre_adapt = 0.0
+    total_post_adapt = 0.0
+    num_sessions = 0
+
+    for session_id in range(test_data.num_sessions):
+        if session_id not in test_data.session_indices:
+            continue
+        if len(test_data.session_indices[session_id]) < 2:
+            continue
+
+        support_samples, query_samples = test_data.get_support_query_split(session_id)
+        if len(support_samples) == 0 or len(query_samples) == 0:
+            continue
+
+        support_batch = test_data.create_batch_from_data(support_samples, session_id)
+        query_batch = test_data.create_batch_from_data(query_samples, session_id)
+
+        if support_batch is None or query_batch is None:
+            continue
+
+        result = trainer.evaluate_with_adaptation(
+            support_batch, query_batch, config.pred_length
+        )
+
+        total_pre_adapt += result['pre_adapt_loss']
+        total_post_adapt += result['post_adapt_loss']
+        num_sessions += 1
+
+    if num_sessions > 0:
+        avg_pre = total_pre_adapt / num_sessions
+        avg_post = total_post_adapt / num_sessions
+        improvement = (avg_pre - avg_post) / avg_pre * 100
+
+        logger.log_tabular('NumSessions', num_sessions)
+        logger.log_tabular('PreAdaptLoss', avg_pre)
+        logger.log_tabular('PostAdaptLoss', avg_post)
+        logger.log_tabular('Improvement%', improvement)
+        logger.dump_tabular()
+
+        logging.info(f"E2E-TTT Test Results:")
+        logging.info(f"  Sessions evaluated: {num_sessions}")
+        logging.info(f"  Pre-adaptation loss: {avg_pre:.6f}")
+        logging.info(f"  Post-adaptation loss: {avg_post:.6f}")
+        logging.info(f"  Improvement: {improvement:.2f}%")

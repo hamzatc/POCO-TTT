@@ -156,40 +156,61 @@ def celegans_flavell_preprocess(filter_mode='none'):
     os.makedirs(processed_dir, exist_ok=True)
 
     worm_idx = 0
-    for file in os.listdir(CELEGANS_FLAVELL_RAW_DIR):
-        if not file.endswith(".json"):
+    for file in sorted(os.listdir(CELEGANS_FLAVELL_RAW_DIR)):
+        # Support both JSON and HDF5 formats
+        if file.endswith(".json"):
+            # Original JSON format
+            with open(osp.join(CELEGANS_FLAVELL_RAW_DIR, file), 'r') as f:
+                data = json.load(f)
+                activity = np.array(data['trace_array'])
+
+                neuron_names = []
+                for i in range(activity.shape[0]):
+                    if str(i + 1) in data['labeled']:
+                        neuron_names.append(data['labeled'][str(i + 1)]['label'])
+                    else:
+                        neuron_names.append(str(i + 1))
+
+                timestamp = data.get('timestamp_confocal', 1.0)
+                time = np.arange(activity.shape[1]) * timestamp * 60
+
+        elif file.endswith(".h5"):
+            # HDF5 format from WormWideWeb/Zenodo
+            with h5py.File(osp.join(CELEGANS_FLAVELL_RAW_DIR, file), 'r') as f:
+                # Neural activity: gcamp/trace_array is (time, neurons), transpose to (neurons, time)
+                activity = np.array(f['gcamp/trace_array']).T
+
+                # Timing information
+                timestamps = np.array(f['timing/timestamp_confocal'])
+                time = timestamps - timestamps[0]  # Start from 0
+
+                # Generate neuron names (not labeled in HDF5)
+                neuron_names = [str(i) for i in range(activity.shape[0])]
+        else:
             continue
 
-        # read from json file
-        with open(osp.join(CELEGANS_FLAVELL_RAW_DIR, file), 'r') as f:
-            data = json.load(f)
-            activity = np.array(data['trace_array'])
+        print(f"Processing {file}: {activity.shape[0]} neurons, {activity.shape[1]} time points")
 
-            ret = process_data_matrix(
-                activity, 
-                f"preprocess/{filter_mode}/celegans_flavell", 
-                divide_baseline=False, # already dF / F
-                normalize_mode='zscore',
-                exp_name=f'celegans_flavell_{worm_idx}',
-                pc_dim=128,
-                filter_mode=filter_mode
-            )
+        ret = process_data_matrix(
+            activity,
+            f"preprocess/{filter_mode}/celegans_flavell",
+            divide_baseline=False,  # already dF / F
+            normalize_mode='zscore',
+            exp_name=f'celegans_flavell_{worm_idx}',
+            pc_dim=128,
+            filter_mode=filter_mode
+        )
 
-            neuron_names = []
-            for i in range(activity.shape[0]):
-                if str(i + 1) in data['labeled']:
-                    neuron_names.append(data['labeled'][str(i + 1)]['label'])
-                else:
-                    neuron_names.append(str(i + 1))
+        save_dict = {
+            'time': time,
+            'neuron_names': neuron_names
+        }
+        print(f'  Neurons: {len(neuron_names)}')
 
-            save_dict = {
-                'time': np.arange(activity.shape[1]) * data['timestamp_confocal'] * 60,
-                'neuron_names': neuron_names
-            }
-            print('Neuron labels:', neuron_names)
+        save_dict.update(ret)
+        out_filename = osp.join(processed_dir, f'{worm_idx}.npz')
+        np.savez(out_filename, **save_dict)
 
-            save_dict.update(ret)
-            out_filename = osp.join(processed_dir, f'{worm_idx}.npz')
-            np.savez(out_filename, **save_dict)
-        
         worm_idx += 1
+
+    print(f"Processed {worm_idx} worms total")

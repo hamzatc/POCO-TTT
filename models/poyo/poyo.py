@@ -88,6 +88,7 @@ class POYO(nn.Module):
         session_index,  # (B, )
         dataset_index, # (B, )
         unit_type, # sum(B * D)
+        disable_unit_dropout: bool = False, # disable unit dropout for meta-learning
     ):
 
         # input
@@ -112,7 +113,7 @@ class POYO(nn.Module):
 
         inputs = unit_embedding.unsqueeze(1) + self.input_proj(x) # sum(B * D), L, dim
 
-        if self.training and self.unit_dropout > 0.0 and np.random.rand() < 0.8:
+        if self.training and self.unit_dropout > 0.0 and np.random.rand() < 0.8 and not disable_unit_dropout:
             mask = torch.rand(inputs.shape[0], device=x.device) < 1 - self.unit_dropout
             inputs = inputs[mask]
             unit_timestamps = unit_timestamps[mask]
@@ -170,3 +171,20 @@ class POYO(nn.Module):
         self.unit_emb.requires_grad_(requires_grad)
         self.session_emb.requires_grad_(requires_grad)
         # self.latent_emb.requires_grad_(requires_grad)
+
+    def get_ttt_params(self):
+        """Get parameters that will be updated at test time (embeddings)"""
+        return {
+            'unit_emb': self.unit_emb,
+            'session_emb': self.session_emb,
+        }
+
+    def get_backbone_params(self):
+        """Get backbone parameters (excluding embeddings) for meta-learning"""
+        return [p for n, p in self.named_parameters()
+                if 'unit_emb' not in n and 'session_emb' not in n]
+
+    def get_backbone_named_params(self):
+        """Get named backbone parameters (excluding embeddings) for meta-learning"""
+        return {n: p for n, p in self.named_parameters()
+                if 'unit_emb' not in n and 'session_emb' not in n}

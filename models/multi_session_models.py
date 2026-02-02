@@ -517,10 +517,11 @@ class Decoder(nn.Module):
             self.conditioning_beta.requires_grad_(False)
             self.out_proj.requires_grad_(False)
         
-    def forward(self, x, unit_indices=None, unit_timestamps=None):
+    def forward(self, x, unit_indices=None, unit_timestamps=None, disable_unit_dropout=False):
         """
         x: list of tensors, each of shape (L, B, D)
         return: list of tensors, each of shape (pred_length, B, D)
+        disable_unit_dropout: if True, disable unit dropout in POYO decoder (for meta-learning)
         """
 
         bsz = [xx.size(1) for xx in x]
@@ -576,7 +577,8 @@ class Decoder(nn.Module):
                 input_seqlen=input_seqlen,
                 session_index=session_index,
                 dataset_index=dataset_index,
-                unit_type=unit_types
+                unit_type=unit_types,
+                disable_unit_dropout=disable_unit_dropout
             ) # sum(B * D), embedding_dim; or sum(B * D), pred_length, embedding_dim
 
             if embed.dim() == 3:
@@ -636,6 +638,49 @@ class Decoder(nn.Module):
             if name in own_state and param.shape == own_state[name].shape:
                 own_state[name].copy_(param)
 
+        if hasattr(self.decoder, 'reset_for_finetuning'):
+            self.decoder.reset_for_finetuning()
+
+    def get_ttt_params(self):
+        """Get parameters that will be updated at test time (embeddings)"""
+        if hasattr(self.decoder, 'get_ttt_params'):
+            return self.decoder.get_ttt_params()
+        return {}
+
+    def get_backbone_params(self):
+        """Get backbone parameters (excluding embeddings) for meta-learning"""
+        if hasattr(self.decoder, 'get_backbone_params'):
+            # Decoder backbone (perceiver, projections) + output projections
+            backbone_params = list(self.decoder.get_backbone_params())
+        else:
+            backbone_params = list(self.decoder.parameters())
+
+        # Add output projection parameters
+        if hasattr(self, 'proj'):
+            if isinstance(self.proj, nn.ModuleList):
+                for proj in self.proj:
+                    backbone_params.extend(proj.parameters())
+            else:
+                backbone_params.extend(self.proj.parameters())
+
+        # Add normalizer parameters if any
+        if hasattr(self, 'normalizer'):
+            backbone_params.extend(self.normalizer.parameters())
+
+        return backbone_params
+
+    def freeze_embeddings(self):
+        """Freeze embedding parameters (for meta-training outer loop)"""
+        if hasattr(self.decoder, 'embedding_requires_grad'):
+            self.decoder.embedding_requires_grad(False)
+
+    def unfreeze_embeddings(self):
+        """Unfreeze embedding parameters (for test-time adaptation)"""
+        if hasattr(self.decoder, 'embedding_requires_grad'):
+            self.decoder.embedding_requires_grad(True)
+
+    def reset_embeddings(self):
+        """Reset embeddings for new session adaptation"""
         if hasattr(self.decoder, 'reset_for_finetuning'):
             self.decoder.reset_for_finetuning()
 

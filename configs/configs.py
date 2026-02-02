@@ -245,3 +245,60 @@ class NeuralPredictionConfig(SupervisedLearningBaseConfig):
                 for k, v in self.dataset_config.items()
             }
         return config_dict
+
+
+class FOMAMLConfig(NeuralPredictionConfig):
+    """Configuration for FOMAML (First-Order MAML) meta-learning training"""
+
+    def __init__(self):
+        super().__init__()
+
+        # Training mode: 'standard', 'fomaml', 'e2e_ttt'
+        self.training_mode = 'fomaml'
+
+        # Meta-learning hyperparameters
+        self.meta_lr = 1e-4          # Outer loop learning rate (for backbone)
+        self.inner_lr = 1e-3         # Inner loop learning rate (for TTT params)
+        self.inner_steps = 5         # Number of gradient steps in inner loop
+        self.meta_batch_size = 4     # Number of sessions per meta-batch
+
+        # Which parameters to update at test time (inner loop)
+        # Options: 'embeddings' (unit_emb, session_emb), 'all'
+        self.ttt_params = 'embeddings'
+
+        # Support/query split ratio within each session
+        self.support_ratio = 0.7     # Fraction of data for support (inner loop)
+
+        # Whether to use second-order gradients (E2E-TTT mode)
+        self.use_second_order = False  # If True, uses create_graph=True
+
+        # Validation frequency for meta-training
+        self.meta_val_every = 100    # Evaluate adaptation on val set every N meta-steps
+
+        # Test-time adaptation settings
+        self.adaptation_steps = 10   # Steps to adapt on new session at test time
+        self.adaptation_lr = 1e-3    # Learning rate for test-time adaptation
+
+
+class E2ETTTConfig(FOMAMLConfig):
+    """Configuration for E2E-TTT (End-to-End Test-Time Training) with second-order gradients"""
+
+    def __init__(self):
+        super().__init__()
+
+        # Training mode
+        self.training_mode = 'e2e_ttt'
+
+        # Enable second-order gradients (create_graph=True in inner loop)
+        self.use_second_order = True
+
+        # Memory optimization settings
+        self.gradient_checkpointing = False   # Use checkpointing to save memory
+        self.mixed_precision = False          # Use FP16/BF16 for forward passes
+        self.accumulation_steps = 1           # Gradient accumulation steps
+
+        # E2E-TTT typically uses fewer inner steps due to memory constraints
+        self.inner_steps = 3
+
+        # Lower meta batch size for memory efficiency
+        self.meta_batch_size = 2

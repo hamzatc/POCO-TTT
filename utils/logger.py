@@ -3,6 +3,14 @@ import os.path as osp
 import time
 import atexit
 
+# Try to import wandb (optional dependency)
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+    wandb = None
+
 color2num = dict(
     gray=30,
     red=31,
@@ -40,7 +48,8 @@ class Logger:
     Makes it easy to save diagnostics, hyperparameter configurations, the
     state of a training run, and the trained model.
     """
-    def __init__(self, output_dir=None, output_fname='progress.txt', exp_name=None):
+    def __init__(self, output_dir=None, output_fname='progress.txt', exp_name=None,
+                 use_wandb=True, wandb_project=None, wandb_entity=None, config=None):
         """
         Initialize a Logger.
 
@@ -58,6 +67,15 @@ class Logger:
                 will know to group them. (Use case: if you run the same
                 hyperparameter configuration with multiple random seeds, you
                 should give them all the same ``exp_name``.)
+
+            use_wandb (bool): Whether to log to Weights & Biases. Defaults to True.
+                Set to False to disable wandb logging.
+
+            wandb_project (string): W&B project name. If None, uses WANDB_PROJECT env var.
+
+            wandb_entity (string): W&B entity (team/user). If None, uses WANDB_ENTITY env var.
+
+            config (dict or object): Configuration to log to W&B.
         """
         self.exp_name = exp_name
         self.output_dir = output_dir
@@ -69,6 +87,38 @@ class Logger:
         self.first_row = True
         self.log_headers = []
         self.log_current_row = {}
+
+        # Initialize wandb if available and requested
+        self.use_wandb = use_wandb and WANDB_AVAILABLE
+        self.wandb_run = None
+
+        if self.use_wandb:
+            # Get project and entity from environment or parameters
+            project = wandb_project or os.environ.get('WANDB_PROJECT', 'POCO-TTT')
+            entity = wandb_entity or os.environ.get('WANDB_ENTITY', 'neuroai')
+
+            # Convert config to dict if it's an object
+            config_dict = None
+            if config is not None:
+                if hasattr(config, '__dict__'):
+                    config_dict = {k: v for k, v in config.__dict__.items()
+                                   if not k.startswith('_') and not callable(v)}
+                elif isinstance(config, dict):
+                    config_dict = config
+
+            try:
+                self.wandb_run = wandb.init(
+                    project=project,
+                    entity=entity,
+                    name=exp_name,
+                    config=config_dict,
+                    dir=output_dir,
+                    reinit=True,
+                )
+                print(colorize(f"Logging to W&B: {project}/{exp_name}", 'cyan', bold=True))
+            except Exception as e:
+                print(colorize(f"Failed to initialize W&B: {e}", 'yellow'))
+                self.use_wandb = False
 
     def log_tabular(self, key, val):
         """
@@ -114,5 +164,22 @@ class Logger:
             self.output_file.write("\t".join(map(str, vals)) + "\n")
             self.output_file.flush()
 
+        # Log to wandb if available
+        if self.use_wandb and self.wandb_run is not None:
+            # Create a dict of metrics to log
+            wandb_metrics = {}
+            for key in self.log_headers:
+                val = self.log_current_row.get(key)
+                if val is not None and hasattr(val, "__float__"):
+                    wandb_metrics[key] = float(val)
+            if wandb_metrics:
+                wandb.log(wandb_metrics)
+
         self.log_current_row.clear()
         self.first_row = False
+
+    def finish(self):
+        """Finish logging and close wandb run."""
+        if self.use_wandb and self.wandb_run is not None:
+            wandb.finish()
+            self.wandb_run = None

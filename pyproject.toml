@@ -1,0 +1,42 @@
+[project]
+name = "poco-ttt"
+version = "0.1.0"
+description = "POCO-TTT: Neural Prediction with Test-Time Training"
+readme = "README.md"
+requires-python = ">=3.10,<3.12"
+dependencies = [
+    "torch>=2.4.0",
+    "torchaudio",
+    "torchvision",
+    "scikit-learn",
+    "scipy",
+    "tqdm",
+    "h5py",
+    "pandas",
+    "matplotlib",
+    "torchmetrics",
+    "pytorch-lightning",
+    "einops",
+    "umap-learn",
+    "mat73",
+    "tensorstore",
+    "xformers",
+    "torchtyping",
+    "numpy<2.0",
+    "wandb",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "isort",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+# Use PyTorch index for CUDA-enabled packages
+extra-index-url = ["https://download.pytorch.org/whl/cu121"]

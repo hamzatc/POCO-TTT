@@ -7,7 +7,7 @@ function name is the experiment name
 
 import os
 from collections import OrderedDict
-from configs.configs import BaseConfig, NeuralPredictionConfig
+from configs.configs import BaseConfig, NeuralPredictionConfig, FOMAMLConfig, E2ETTTConfig
 from configs.config_global import EXP_TYPES
 from utils.config_utils import vary_config
 from configs.configure_model_datasets import configure_models, configure_dataset
@@ -883,6 +883,359 @@ def compare_pretraining_dataset():
                 config.freeze_conditioned_net = True
                 config.model_label = 'POCO'
 
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+# ============== FOMAML (Meta-Learning) Experiments ==============
+
+def fomaml_test():
+    """Test FOMAML training on a small dataset."""
+    config = FOMAMLConfig()
+    config.experiment_name = 'fomaml_test'
+
+    # FOMAML-specific settings
+    config.training_mode = 'fomaml'
+    config.meta_lr = 1e-4
+    config.inner_lr = 1e-3
+    config.inner_steps = 5
+    config.meta_batch_size = 4
+    config.support_ratio = 0.7
+
+    # Training settings
+    config.max_batch = 1000
+    config.log_every = 100
+    config.save_every = 500
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = ['celegansflavell', ]
+    config_ranges['model_label'] = ['POCO', ]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=1)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def fomaml_zebrafish():
+    """FOMAML training on zebrafish dataset."""
+    config = FOMAMLConfig()
+    config.experiment_name = 'fomaml_zebrafish'
+
+    # FOMAML-specific settings
+    config.training_mode = 'fomaml'
+    config.meta_lr = 1e-4
+    config.inner_lr = 1e-3
+    config.inner_steps = 5
+    config.meta_batch_size = 4
+    config.support_ratio = 0.7
+    config.adaptation_steps = 10
+    config.adaptation_lr = 1e-3
+
+    # Training settings
+    config.max_batch = 10000
+    config.log_every = 100
+    config.save_every = 1000
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = ['zebrafishahrens_pc', ]
+    config_ranges['model_label'] = ['POCO', ]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def fomaml_compare_inner_steps():
+    """Compare different numbers of inner loop steps for FOMAML."""
+    config = FOMAMLConfig()
+    config.experiment_name = 'fomaml_compare_inner_steps'
+
+    # FOMAML-specific settings
+    config.training_mode = 'fomaml'
+    config.meta_lr = 1e-4
+    config.inner_lr = 1e-3
+    config.meta_batch_size = 4
+    config.support_ratio = 0.7
+
+    # Training settings
+    config.max_batch = 5000
+    config.log_every = 100
+    config.save_every = 1000
+
+    config_ranges = OrderedDict()
+    config_ranges['inner_steps'] = [1, 3, 5, 10]
+    config_ranges['dataset_label'] = ['celegansflavell', ]
+    config_ranges['model_label'] = ['POCO', ]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def fomaml_compare_inner_lr():
+    """Compare different inner loop learning rates for FOMAML."""
+    config = FOMAMLConfig()
+    config.experiment_name = 'fomaml_compare_inner_lr'
+
+    # FOMAML-specific settings
+    config.training_mode = 'fomaml'
+    config.meta_lr = 1e-4
+    config.inner_steps = 5
+    config.meta_batch_size = 4
+    config.support_ratio = 0.7
+
+    # Training settings
+    config.max_batch = 5000
+    config.log_every = 100
+    config.save_every = 1000
+
+    config_ranges = OrderedDict()
+    config_ranges['inner_lr'] = [1e-4, 5e-4, 1e-3, 5e-3]
+    config_ranges['dataset_label'] = ['celegansflavell', ]
+    config_ranges['model_label'] = ['POCO', ]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def fomaml_multi_species():
+    """FOMAML training across multiple species."""
+    config = FOMAMLConfig()
+    config.experiment_name = 'fomaml_multi_species'
+
+    # FOMAML-specific settings
+    config.training_mode = 'fomaml'
+    config.meta_lr = 1e-4
+    config.inner_lr = 1e-3
+    config.inner_steps = 5
+    config.meta_batch_size = 4
+    config.support_ratio = 0.7
+    config.adaptation_steps = 10
+    config.adaptation_lr = 1e-3
+
+    # Training settings
+    config.max_batch = 10000
+    config.log_every = 100
+    config.save_every = 1000
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = [
+        'zebrafishahrens_pc',
+        'celegansflavell',
+        'mice',
+    ]
+    config_ranges['model_label'] = ['POCO', ]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+# ============== E2E-TTT (End-to-End Test-Time Training) Experiments ==============
+
+def e2e_ttt_test():
+    """Test E2E-TTT training on a small dataset."""
+    config = E2ETTTConfig()
+    config.experiment_name = 'e2e_ttt_test'
+
+    # E2E-TTT specific settings (second-order gradients)
+    config.training_mode = 'e2e_ttt'
+    config.meta_lr = 1e-4
+    config.inner_lr = 1e-3
+    config.inner_steps = 3
+    config.meta_batch_size = 2
+    config.support_ratio = 0.7
+    config.use_second_order = True
+
+    # Training settings
+    config.max_batch = 1000
+    config.log_every = 100
+    config.save_every = 500
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = ['celegansflavell', ]
+    config_ranges['model_label'] = ['POCO', ]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=1)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def e2e_ttt_zebrafish():
+    """E2E-TTT training on zebrafish dataset."""
+    config = E2ETTTConfig()
+    config.experiment_name = 'e2e_ttt_zebrafish'
+
+    # E2E-TTT specific settings
+    config.training_mode = 'e2e_ttt'
+    config.meta_lr = 1e-4
+    config.inner_lr = 1e-3
+    config.inner_steps = 3
+    config.meta_batch_size = 2
+    config.support_ratio = 0.7
+    config.use_second_order = True
+    config.adaptation_steps = 10
+    config.adaptation_lr = 1e-3
+
+    # Training settings
+    config.max_batch = 10000
+    config.log_every = 100
+    config.save_every = 1000
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = ['zebrafishahrens_pc', ]
+    config_ranges['model_label'] = ['POCO', ]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def e2e_ttt_compare_inner_steps():
+    """Compare different numbers of inner loop steps for E2E-TTT."""
+    config = E2ETTTConfig()
+    config.experiment_name = 'e2e_ttt_compare_inner_steps'
+
+    # E2E-TTT specific settings
+    config.training_mode = 'e2e_ttt'
+    config.meta_lr = 1e-4
+    config.inner_lr = 1e-3
+    config.meta_batch_size = 2
+    config.support_ratio = 0.7
+    config.use_second_order = True
+
+    # Training settings
+    config.max_batch = 5000
+    config.log_every = 100
+    config.save_every = 1000
+
+    config_ranges = OrderedDict()
+    config_ranges['inner_steps'] = [1, 3, 5]
+    config_ranges['dataset_label'] = ['celegansflavell', ]
+    config_ranges['model_label'] = ['POCO', ]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def e2e_ttt_multi_species():
+    """E2E-TTT training across multiple species."""
+    config = E2ETTTConfig()
+    config.experiment_name = 'e2e_ttt_multi_species'
+
+    # E2E-TTT specific settings
+    config.training_mode = 'e2e_ttt'
+    config.meta_lr = 1e-4
+    config.inner_lr = 1e-3
+    config.inner_steps = 3
+    config.meta_batch_size = 2
+    config.support_ratio = 0.7
+    config.use_second_order = True
+    config.adaptation_steps = 10
+    config.adaptation_lr = 1e-3
+
+    # Training settings
+    config.max_batch = 10000
+    config.log_every = 100
+    config.save_every = 1000
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = [
+        'zebrafishahrens_pc',
+        'celegansflavell',
+        'mice',
+    ]
+    config_ranges['model_label'] = ['POCO', ]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def compare_ttt_methods():
+    """Compare FOMAML vs E2E-TTT on multiple datasets."""
+    # Returns both FOMAML and E2E-TTT configs for comparison
+
+    # FOMAML configs
+    fomaml_config = FOMAMLConfig()
+    fomaml_config.experiment_name = 'compare_ttt_methods'
+    fomaml_config.training_mode = 'fomaml'
+    fomaml_config.meta_lr = 1e-4
+    fomaml_config.inner_lr = 1e-3
+    fomaml_config.inner_steps = 5
+    fomaml_config.meta_batch_size = 4
+    fomaml_config.support_ratio = 0.7
+    fomaml_config.max_batch = 5000
+    fomaml_config.log_every = 100
+    fomaml_config.save_every = 1000
+
+    fomaml_ranges = OrderedDict()
+    fomaml_ranges['dataset_label'] = ['celegansflavell', 'zebrafishahrens_pc']
+    fomaml_ranges['model_label'] = ['POCO', ]
+
+    fomaml_configs = vary_config(fomaml_config, fomaml_ranges, mode='combinatorial', num_seed=3)
+    fomaml_configs = configure_models(fomaml_configs)
+    fomaml_configs = configure_dataset(fomaml_configs)
+
+    # E2E-TTT configs
+    e2e_config = E2ETTTConfig()
+    e2e_config.experiment_name = 'compare_ttt_methods'
+    e2e_config.training_mode = 'e2e_ttt'
+    e2e_config.meta_lr = 1e-4
+    e2e_config.inner_lr = 1e-3
+    e2e_config.inner_steps = 3
+    e2e_config.meta_batch_size = 2
+    e2e_config.support_ratio = 0.7
+    e2e_config.use_second_order = True
+    e2e_config.max_batch = 5000
+    e2e_config.log_every = 100
+    e2e_config.save_every = 1000
+
+    e2e_ranges = OrderedDict()
+    e2e_ranges['dataset_label'] = ['celegansflavell', 'zebrafishahrens_pc']
+    e2e_ranges['model_label'] = ['POCO', ]
+
+    e2e_configs = vary_config(e2e_config, e2e_ranges, mode='combinatorial', num_seed=3)
+    e2e_configs = configure_models(e2e_configs)
+    e2e_configs = configure_dataset(e2e_configs)
+
+    # Merge configs
+    all_configs = {}
+    for seed in fomaml_configs.keys():
+        all_configs[seed] = fomaml_configs.get(seed, []) + e2e_configs.get(seed, [])
+
+    return all_configs
+
+
+def poco_baseline():
+    """POCO baseline (standard training) for comparison with TTT methods."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'poco_baseline'
+
+    config.max_batch = 10000
+    config.log_every = 100
+    config.save_every = 1000
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = [
+        'celegansflavell',
+        'zebrafishahrens_pc',
+        'mice',
+    ]
+    config_ranges['model_label'] = ['POCO', ]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
     configs = configure_models(configs)
     configs = configure_dataset(configs)
     return configs

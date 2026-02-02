@@ -17,9 +17,8 @@
 # Create logs directory if it doesn't exist
 mkdir -p sbatch/logs
 
-# Load modules (adjust based on cluster setup)
-module load python/3.10
-module load cuda/12.1
+# Load modules
+module load cuda/12.2.0-fasrc01
 
 # Activate environment
 cd /n/holystore01/LABS/pehlevan_lab/Lab/hamza/projects/current/POCO-TTT
@@ -29,5 +28,5 @@ source .venv/bin/activate
 export WANDB_PROJECT=POCO-TTT
 export WANDB_ENTITY=neuroai
 
-# Run POCO baseline experiment
-python main.py -t poco_baseline
+# Run POCO baseline experiment (auto-confirm with yes)
+yes | python main.py -t poco_baseline

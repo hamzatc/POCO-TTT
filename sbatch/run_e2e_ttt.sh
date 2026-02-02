@@ -19,8 +19,7 @@
 mkdir -p sbatch/logs
 
 # Load modules
-module load python/3.10
-module load cuda/12.1
+module load cuda/12.2.0-fasrc01
 
 # Activate environment
 cd /n/holystore01/LABS/pehlevan_lab/Lab/hamza/projects/current/POCO-TTT
@@ -30,5 +29,5 @@ source .venv/bin/activate
 export WANDB_PROJECT=POCO-TTT
 export WANDB_ENTITY=neuroai
 
-# Run E2E-TTT multi-species experiment
-python main.py -t e2e_ttt_multi_species
+# Run E2E-TTT multi-species experiment (auto-confirm with yes)
+yes | python main.py -t e2e_ttt_multi_species

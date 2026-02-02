@@ -124,23 +124,37 @@ class FOMAMLTrainer:
             return total_loss / total_count
         return total_loss
 
+    def set_params(self, params: Dict[str, torch.Tensor]):
+        """Set embedding parameters in the model"""
+        emb_modules = self.model.get_ttt_params() if hasattr(self.model, 'get_ttt_params') else {}
+
+        for name, value in params.items():
+            # Parse the parameter path
+            parts = name.split('.')
+            if len(parts) == 2:
+                module_name, param_name = parts
+                if module_name in emb_modules:
+                    module = emb_modules[module_name]
+                    if hasattr(module, param_name):
+                        getattr(module, param_name).data.copy_(value.data)
+
     def inner_loop(
         self,
         support_data: Tuple,
         pred_length: int,
-    ) -> List[float]:
+    ) -> Tuple[Dict[str, torch.Tensor], List[float]]:
         """
         Run inner loop adaptation on support set.
 
-        This temporarily updates embedding parameters while keeping
-        backbone frozen. Uses standard gradient descent.
+        Uses manual gradient descent (not SGD optimizer) to properly handle
+        first-order MAML updates.
 
         Args:
             support_data: (input_list, target_list, info_list) for support set
             pred_length: Number of prediction steps
 
         Returns:
-            List of inner loop losses
+            (adapted_params, inner_losses) - adapted parameters and loss history
         """
         inner_losses = []
 
@@ -148,41 +162,44 @@ class FOMAMLTrainer:
         emb_params = self.get_embedding_params()
         if len(emb_params) == 0:
             logging.warning("No embedding parameters found for inner loop")
-            return inner_losses
+            return {}, inner_losses
 
-        # Create inner optimizer for embedding params only
-        inner_optimizer = torch.optim.SGD(
-            list(emb_params.values()),
-            lr=self.inner_lr
-        )
+        # Clone parameters for inner loop
+        fast_params = {k: v.clone().requires_grad_(True) for k, v in emb_params.items()}
 
-        # Freeze backbone during inner loop
-        self.model.freeze_embeddings()
-        for param in self.model.get_backbone_params():
-            param.requires_grad = False
-
-        # Unfreeze embeddings for inner loop
-        self.model.unfreeze_embeddings()
-
-        # Inner loop steps
+        # Inner loop steps using manual gradient descent
         for step in range(self.inner_steps):
-            inner_optimizer.zero_grad()
+            # Set the fast params in the model temporarily
+            self.set_params(fast_params)
 
+            # Compute loss
             loss = self.compute_loss(support_data, pred_length)
             inner_losses.append(loss.item())
 
-            # Backward pass
-            # For FOMAML, we don't need create_graph
-            # For E2E-TTT, we would set create_graph=True
-            loss.backward(create_graph=self.use_second_order)
+            # Compute gradients manually
+            # For FOMAML: create_graph=False (first-order only)
+            grads = torch.autograd.grad(
+                loss,
+                fast_params.values(),
+                create_graph=False,  # First-order MAML
+                retain_graph=False,
+                allow_unused=True
+            )
 
-            inner_optimizer.step()
+            # Update fast params (gradient descent step)
+            new_fast_params = {}
+            for (name, param), grad in zip(fast_params.items(), grads):
+                if grad is not None:
+                    new_fast_params[name] = param - self.inner_lr * grad
+                else:
+                    new_fast_params[name] = param.clone()
 
-        # Re-enable backbone gradients for outer loop
-        for param in self.model.get_backbone_params():
-            param.requires_grad = True
+            fast_params = new_fast_params
 
-        return inner_losses
+        # Set final adapted params in model
+        self.set_params(fast_params)
+
+        return fast_params, inner_losses
 
     def meta_train_step(
         self,
@@ -192,6 +209,13 @@ class FOMAMLTrainer:
     ) -> Dict[str, float]:
         """
         Perform one meta-training step.
+
+        For FOMAML, we:
+        1. Adapt embeddings on support set (inner loop)
+        2. Compute query loss with adapted embeddings
+        3. Use query loss to update ALL model parameters (backbone + embeddings)
+
+        This is first-order because we don't differentiate through the inner loop.
 
         Args:
             session_data_fn: Function that takes session_id and returns
@@ -209,6 +233,9 @@ class FOMAMLTrainer:
         all_query_losses = []
         valid_sessions = 0
 
+        # Save original embedding state
+        original_state = self.clone_embedding_state()
+
         for session_id in session_ids:
             # Get support and query data for this session
             support_data, query_data = session_data_fn(session_id)
@@ -216,14 +243,13 @@ class FOMAMLTrainer:
             if support_data is None or query_data is None:
                 continue
 
-            # Save original embedding state
-            original_state = self.clone_embedding_state()
-
             # Inner loop: Adapt embeddings on support set
-            inner_losses = self.inner_loop(support_data, pred_length)
+            # Returns adapted params and loss history
+            fast_params, inner_losses = self.inner_loop(support_data, pred_length)
             all_inner_losses.extend(inner_losses)
 
             # Evaluate on query set with adapted embeddings
+            # The model already has adapted params set by inner_loop
             query_loss = self.compute_loss(query_data, pred_length)
             all_query_losses.append(query_loss.item())
 
@@ -251,7 +277,7 @@ class FOMAMLTrainer:
         # Gradient clipping
         if hasattr(self.config, 'grad_clip') and self.config.grad_clip is not None:
             torch.nn.utils.clip_grad_norm_(
-                self.model.get_backbone_params(),
+                self.model.parameters(),
                 self.config.grad_clip
             )
 
@@ -311,7 +337,7 @@ class FOMAMLTrainer:
         self.inner_lr = lr
 
         # Run inner loop for adaptation
-        adaptation_losses = self.inner_loop(support_data, pred_length)
+        _, adaptation_losses = self.inner_loop(support_data, pred_length)
 
         # Restore original settings
         self.inner_steps = orig_inner_steps

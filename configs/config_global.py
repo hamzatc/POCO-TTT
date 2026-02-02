@@ -21,9 +21,9 @@ MICE_BRAIN_AREAS = ['PPC', 'RSP', 'V1', 'M2']
 ZEBRAFISH_BRAIN_AREAS = ['LHb', 'MHb', 'gc', 'raphe', 'ctel', 'vent', 'dthal', 'vthal', ]
 
 N_ZEBRAFISH_SESSIONS = 19
-N_ZEBRAFISH_AHNRENS_SESSIONS = 15
+N_ZEBRAFISH_AHNRENS_SESSIONS = 7  # Only 7 sessions available from Zenodo dataset
 N_CELEGANS_SESSIONS = 5
-N_CELEGANS_FLAVELL_SESSIONS = 40
+N_CELEGANS_FLAVELL_SESSIONS = 80  # 80 sessions from WormWideWeb
 N_MICE_SESSIONS = 12
 
 RAW_DATA_SUFFIX = '_CNMF_compressed.h5'

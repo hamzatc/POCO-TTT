@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.optim.lr_scheduler as lrs
 import time
+from typing import Dict
 
 from configs.config_global import LOG_LEVEL, NP_SEED, TCH_SEED, USE_CUDA, DATA_DIR
 from configs.configs import BaseConfig, SupervisedLearningBaseConfig, NeuralPredictionConfig, FOMAMLConfig
@@ -379,14 +380,17 @@ def fomaml_train(config: FOMAMLConfig):
             logger.log_tabular('AvgQueryLoss', stats['avg_query_loss'])
 
             # Evaluate on validation set with adaptation
-            val_loss = evaluate_fomaml(net, trainer, val_data, config)
-            logger.log_tabular('ValLoss', val_loss)
-            val_losses.append(val_loss)
+            val_metrics = evaluate_fomaml(net, trainer, val_data, config)
+            # TestLoss: comparable to baseline (no adaptation)
+            logger.log_tabular('TestLoss', val_metrics['pre_adapt_loss'])
+            # ValLoss: after adaptation (shows TTT benefit)
+            logger.log_tabular('ValLoss', val_metrics['post_adapt_loss'])
+            val_losses.append(val_metrics['post_adapt_loss'])
 
-            # Save best model
-            if val_loss <= min(val_losses):
+            # Save best model based on post-adaptation loss
+            if val_metrics['post_adapt_loss'] <= min(val_losses):
                 torch.save(net.state_dict(), osp.join(config.save_path, 'net_best.pth'))
-                logging.info(f"  New best model at step {i_b}, val_loss: {val_loss:.6f}")
+                logging.info(f"  New best model at step {i_b}, val_loss: {val_metrics['post_adapt_loss']:.6f}")
 
             logger.dump_tabular()
             train_loss_accum = 0.0
@@ -411,7 +415,7 @@ def evaluate_fomaml(
     trainer,
     val_data: SessionDatasetIters,
     config: FOMAMLConfig,
-) -> float:
+) -> Dict[str, float]:
     """
     Evaluate FOMAML model on validation set with test-time adaptation.
 
@@ -420,10 +424,13 @@ def evaluate_fomaml(
     2. Adapt on support
     3. Evaluate on query
 
-    Returns average query loss after adaptation.
+    Returns dict with:
+    - 'pre_adapt_loss': Average loss before adaptation (comparable to baseline TestLoss)
+    - 'post_adapt_loss': Average loss after adaptation (TTT benefit)
     """
     net.eval()
-    total_loss = 0.0
+    total_pre_loss = 0.0
+    total_post_loss = 0.0
     num_sessions = 0
 
     for session_id in range(val_data.num_sessions):
@@ -447,13 +454,17 @@ def evaluate_fomaml(
         result = trainer.evaluate_with_adaptation(
             support_batch, query_batch, config.pred_length
         )
-        total_loss += result['post_adapt_loss']
+        total_pre_loss += result['pre_adapt_loss']
+        total_post_loss += result['post_adapt_loss']
         num_sessions += 1
 
     if num_sessions == 0:
-        return float('inf')
+        return {'pre_adapt_loss': float('inf'), 'post_adapt_loss': float('inf')}
 
-    return total_loss / num_sessions
+    return {
+        'pre_adapt_loss': total_pre_loss / num_sessions,
+        'post_adapt_loss': total_post_loss / num_sessions,
+    }
 
 
 def fomaml_eval(config: FOMAMLConfig):
@@ -620,14 +631,17 @@ def e2e_ttt_train(config):
             logger.log_tabular('AvgQueryLoss', stats['avg_query_loss'])
 
             # Evaluate on validation set with adaptation
-            val_loss = evaluate_e2e_ttt(net, trainer, val_data, config)
-            logger.log_tabular('ValLoss', val_loss)
-            val_losses.append(val_loss)
+            val_metrics = evaluate_e2e_ttt(net, trainer, val_data, config)
+            # TestLoss: comparable to baseline (no adaptation)
+            logger.log_tabular('TestLoss', val_metrics['pre_adapt_loss'])
+            # ValLoss: after adaptation (shows TTT benefit)
+            logger.log_tabular('ValLoss', val_metrics['post_adapt_loss'])
+            val_losses.append(val_metrics['post_adapt_loss'])
 
-            # Save best model
-            if val_loss <= min(val_losses):
+            # Save best model based on post-adaptation loss
+            if val_metrics['post_adapt_loss'] <= min(val_losses):
                 torch.save(net.state_dict(), osp.join(config.save_path, 'net_best.pth'))
-                logging.info(f"  New best model at step {i_b}, val_loss: {val_loss:.6f}")
+                logging.info(f"  New best model at step {i_b}, val_loss: {val_metrics['post_adapt_loss']:.6f}")
 
             logger.dump_tabular()
             train_loss_accum = 0.0
@@ -652,12 +666,17 @@ def evaluate_e2e_ttt(
     trainer,
     val_data: SessionDatasetIters,
     config,
-) -> float:
+) -> Dict[str, float]:
     """
     Evaluate E2E-TTT model on validation set with test-time adaptation.
+
+    Returns dict with:
+    - 'pre_adapt_loss': Average loss before adaptation (comparable to baseline TestLoss)
+    - 'post_adapt_loss': Average loss after adaptation (TTT benefit)
     """
     net.eval()
-    total_loss = 0.0
+    total_pre_loss = 0.0
+    total_post_loss = 0.0
     num_sessions = 0
 
     for session_id in range(val_data.num_sessions):
@@ -681,13 +700,17 @@ def evaluate_e2e_ttt(
         result = trainer.evaluate_with_adaptation(
             support_batch, query_batch, config.pred_length
         )
-        total_loss += result['post_adapt_loss']
+        total_pre_loss += result['pre_adapt_loss']
+        total_post_loss += result['post_adapt_loss']
         num_sessions += 1
 
     if num_sessions == 0:
-        return float('inf')
+        return {'pre_adapt_loss': float('inf'), 'post_adapt_loss': float('inf')}
 
-    return total_loss / num_sessions
+    return {
+        'pre_adapt_loss': total_pre_loss / num_sessions,
+        'post_adapt_loss': total_post_loss / num_sessions,
+    }
 
 
 def e2e_ttt_eval(config):

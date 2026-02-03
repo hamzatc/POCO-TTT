@@ -28,5 +28,8 @@ source .venv/bin/activate
 export WANDB_PROJECT=POCO-TTT
 export WANDB_ENTITY=neuroai
 
+# Force unbuffered Python output
+export PYTHONUNBUFFERED=1
+
 # Run FOMAML multi-species experiment (auto-confirm with yes)
-yes | python main.py -t fomaml_multi_species
+yes | python -u main.py -t fomaml_multi_species

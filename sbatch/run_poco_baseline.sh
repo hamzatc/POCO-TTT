@@ -28,5 +28,8 @@ source .venv/bin/activate
 export WANDB_PROJECT=POCO-TTT
 export WANDB_ENTITY=neuroai
 
+# Force unbuffered Python output
+export PYTHONUNBUFFERED=1
+
 # Run POCO baseline experiment (auto-confirm with yes)
-yes | python main.py -t poco_baseline
+yes | python -u main.py -t poco_baseline

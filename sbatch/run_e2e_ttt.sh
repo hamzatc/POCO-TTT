@@ -29,5 +29,8 @@ source .venv/bin/activate
 export WANDB_PROJECT=POCO-TTT
 export WANDB_ENTITY=neuroai
 
+# Force unbuffered Python output
+export PYTHONUNBUFFERED=1
+
 # Run E2E-TTT multi-species experiment (auto-confirm with yes)
-yes | python main.py -t e2e_ttt_multi_species
+yes | python -u main.py -t e2e_ttt_multi_species

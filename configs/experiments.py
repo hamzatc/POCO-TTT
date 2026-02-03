@@ -1020,7 +1020,7 @@ def fomaml_multi_species():
     config.batch_size = 32  # Same as E2E-TTT
 
     # Training settings
-    config.max_batch = 10000
+    config.max_batch = 5000
     config.log_every = 100
     config.save_every = 1000
 
@@ -1147,7 +1147,7 @@ def e2e_ttt_multi_species():
     config.batch_size = 32  # Same as FOMAML
 
     # Training settings
-    config.max_batch = 10000
+    config.max_batch = 5000
     config.log_every = 100
     config.save_every = 1000
 
@@ -1225,7 +1225,7 @@ def poco_baseline():
     config = NeuralPredictionConfig()
     config.experiment_name = 'poco_baseline'
 
-    config.max_batch = 10000
+    config.max_batch = 5000
     config.log_every = 100
     config.save_every = 1000
 

@@ -238,7 +238,7 @@ meta_loss = (1/N) * sum(query_loss_i for i in sessions)
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `max_batch` | 10000 | Total training iterations |
+| `max_batch` | 5000 | Total training iterations |
 | `lr` / `meta_lr` | 1e-4 | Learning rate |
 | `hidden_dim` | 512 | Model hidden dimension |
 | `num_layers` | 2 | Perceiver processor layers |

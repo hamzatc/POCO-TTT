@@ -214,11 +214,11 @@ class NeuralPrediction(TaskFunction):
                 avg_mse_score /= len(session_ids)
 
                 if phase == 'val':
-                    logger.log_tabular(f'{dataset}_{phase}_pred_num', int(sum_pred_num))
-                    logger.log_tabular(f'{dataset}_{phase}_score', avg_mse_score)
-                
-                logger.log_tabular(f'{dataset}_{phase}_mse', sum_mse / sum_pred_num)
-                logger.log_tabular(f'{dataset}_{phase}_mae', sum_mae / sum_pred_num)
+                    logger.log_tabular(f'{dataset}/{phase}/prediction_count', int(sum_pred_num))
+                    logger.log_tabular(f'{dataset}/{phase}/score', avg_mse_score)
+
+                logger.log_tabular(f'{dataset}/{phase}/mse', sum_mse / sum_pred_num)
+                logger.log_tabular(f'{dataset}/{phase}/mae', sum_mae / sum_pred_num)
             
             if is_best and len(self.sample_trials[phase]) > 0:
                 self.plot_prediction(save_path, phase)

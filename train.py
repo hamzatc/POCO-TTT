@@ -75,7 +75,7 @@ def evaluate_performance(
     
     eval_time = time.time() - start
     logging.info('Avg inference time per batch: {:.1f} ms'.format(eval_time * 1000 / len(test_data.data_loaders[0].dataset) * config.batch_size))
-    logger.log_tabular('TestLoss', avg_testloss)
+    logger.log_tabular('val/loss', avg_testloss)
     testloss_list.append(avg_testloss)
 
     # save the model with best testing loss
@@ -240,10 +240,10 @@ def model_train(config: NeuralPredictionConfig):
             # log performance
             if i_b % config.log_every == config.log_every - 1:
 
-                logger.log_tabular('Epoch', epoch)
-                logger.log_tabular('BatchNum', i_b + 1)
-                logger.log_tabular('DataNum', (i_b + 1) * config.batch_size * train_data.num_datasets)
-                logger.log_tabular('TrainLoss', train_loss / config.log_every)
+                logger.log_tabular('train/epoch', epoch)
+                logger.log_tabular('train/batch_number', i_b + 1)
+                logger.log_tabular('train/samples_seen', (i_b + 1) * config.batch_size * train_data.num_datasets)
+                logger.log_tabular('train/loss', train_loss / config.log_every)
 
                 evaluate_performance(net, config, test_data, task_func, logger, testloss_list, i_b + 1, train_loss / config.log_every)
                 i_log += 1
@@ -408,11 +408,11 @@ def classical_baseline_train(config: NeuralPredictionConfig):
     logging.info(f"Fitting completed in {fit_time:.2f}s")
 
     # Log fitting info
-    logger.log_tabular('FitTime', fit_time)
-    logger.log_tabular('Epoch', 0)
-    logger.log_tabular('BatchNum', 0)
-    logger.log_tabular('DataNum', 0)
-    logger.log_tabular('TrainLoss', 0.0)
+    logger.log_tabular('train/fit_time_seconds', fit_time)
+    logger.log_tabular('train/epoch', 0)
+    logger.log_tabular('train/batch_number', 0)
+    logger.log_tabular('train/samples_seen', 0)
+    logger.log_tabular('train/loss', 0.0)
 
     # Evaluate on validation set
     testloss_list = [float('inf')]
@@ -533,20 +533,20 @@ def fomaml_train(config: FOMAMLConfig):
 
         # Log performance
         if i_b % config.log_every == 0:
-            logger.log_tabular('BatchNum', i_b)
-            logger.log_tabular('MetaLoss', train_loss_accum / config.log_every)
-            logger.log_tabular('AvgInnerLoss', stats['avg_inner_loss'])
-            logger.log_tabular('AvgQueryLoss', stats['avg_query_loss'])
+            logger.log_tabular('train/batch_number', i_b)
+            logger.log_tabular('train/meta_loss', train_loss_accum / config.log_every)
+            logger.log_tabular('train/inner_loop_loss_avg', stats['avg_inner_loss'])
+            logger.log_tabular('train/query_loss_avg', stats['avg_query_loss'])
 
             # Evaluate on validation set with adaptation
             val_metrics = evaluate_fomaml(net, trainer, val_data, config, baseline_mse=baseline_mse)
-            # TestLoss: comparable to baseline (no adaptation)
-            logger.log_tabular('TestLoss', val_metrics['pre_adapt_loss'])
-            # ValLoss: after adaptation (shows TTT benefit)
-            logger.log_tabular('ValLoss', val_metrics['post_adapt_loss'])
-            # ValScore: 1 - (mse / copy_mse) - comparable metric to baselines
-            logger.log_tabular('PreAdaptScore', val_metrics['pre_adapt_score'])
-            logger.log_tabular('PostAdaptScore', val_metrics['post_adapt_score'])
+            # Loss before adaptation (comparable to standard training)
+            logger.log_tabular('val/loss_before_adaptation', val_metrics['pre_adapt_loss'])
+            # Loss after adaptation (shows TTT benefit)
+            logger.log_tabular('val/loss_after_adaptation', val_metrics['post_adapt_loss'])
+            # val_score: 1 - (mse / copy_mse) - comparable metric to baselines
+            logger.log_tabular('val/score_before_adaptation', val_metrics['pre_adapt_score'])
+            logger.log_tabular('val/score_after_adaptation', val_metrics['post_adapt_score'])
             val_losses.append(val_metrics['post_adapt_loss'])
 
             # Save best model based on post-adaptation loss
@@ -704,10 +704,10 @@ def fomaml_eval(config: FOMAMLConfig):
         avg_post = total_post_adapt / num_sessions
         improvement = (avg_pre - avg_post) / avg_pre * 100
 
-        logger.log_tabular('NumSessions', num_sessions)
-        logger.log_tabular('PreAdaptLoss', avg_pre)
-        logger.log_tabular('PostAdaptLoss', avg_post)
-        logger.log_tabular('Improvement%', improvement)
+        logger.log_tabular('test/num_sessions_evaluated', num_sessions)
+        logger.log_tabular('test/loss_before_adaptation', avg_pre)
+        logger.log_tabular('test/loss_after_adaptation', avg_post)
+        logger.log_tabular('test/adaptation_improvement_percent', improvement)
         logger.dump_tabular()
 
         logging.info(f"FOMAML Test Results:")
@@ -810,20 +810,20 @@ def e2e_ttt_train(config):
 
         # Log performance
         if i_b % config.log_every == 0:
-            logger.log_tabular('BatchNum', i_b)
-            logger.log_tabular('MetaLoss', train_loss_accum / config.log_every)
-            logger.log_tabular('AvgInnerLoss', stats['avg_inner_loss'])
-            logger.log_tabular('AvgQueryLoss', stats['avg_query_loss'])
+            logger.log_tabular('train/batch_number', i_b)
+            logger.log_tabular('train/meta_loss', train_loss_accum / config.log_every)
+            logger.log_tabular('train/inner_loop_loss_avg', stats['avg_inner_loss'])
+            logger.log_tabular('train/query_loss_avg', stats['avg_query_loss'])
 
             # Evaluate on validation set with adaptation
             val_metrics = evaluate_e2e_ttt(net, trainer, val_data, config, baseline_mse=baseline_mse)
-            # TestLoss: comparable to baseline (no adaptation)
-            logger.log_tabular('TestLoss', val_metrics['pre_adapt_loss'])
-            # ValLoss: after adaptation (shows TTT benefit)
-            logger.log_tabular('ValLoss', val_metrics['post_adapt_loss'])
-            # ValScore: 1 - (mse / copy_mse) - comparable metric to baselines
-            logger.log_tabular('PreAdaptScore', val_metrics['pre_adapt_score'])
-            logger.log_tabular('PostAdaptScore', val_metrics['post_adapt_score'])
+            # Loss before adaptation (comparable to standard training)
+            logger.log_tabular('val/loss_before_adaptation', val_metrics['pre_adapt_loss'])
+            # Loss after adaptation (shows TTT benefit)
+            logger.log_tabular('val/loss_after_adaptation', val_metrics['post_adapt_loss'])
+            # val_score: 1 - (mse / copy_mse) - comparable metric to baselines
+            logger.log_tabular('val/score_before_adaptation', val_metrics['pre_adapt_score'])
+            logger.log_tabular('val/score_after_adaptation', val_metrics['post_adapt_score'])
             val_losses.append(val_metrics['post_adapt_loss'])
 
             # Save best model based on post-adaptation loss
@@ -976,10 +976,10 @@ def e2e_ttt_eval(config):
         avg_post = total_post_adapt / num_sessions
         improvement = (avg_pre - avg_post) / avg_pre * 100
 
-        logger.log_tabular('NumSessions', num_sessions)
-        logger.log_tabular('PreAdaptLoss', avg_pre)
-        logger.log_tabular('PostAdaptLoss', avg_post)
-        logger.log_tabular('Improvement%', improvement)
+        logger.log_tabular('test/num_sessions_evaluated', num_sessions)
+        logger.log_tabular('test/loss_before_adaptation', avg_pre)
+        logger.log_tabular('test/loss_after_adaptation', avg_post)
+        logger.log_tabular('test/adaptation_improvement_percent', improvement)
         logger.dump_tabular()
 
         logging.info(f"E2E-TTT Test Results:")

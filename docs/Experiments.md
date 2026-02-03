@@ -193,26 +193,52 @@ Output Layer:
 
 ### Training Metrics
 
-| Metric | Description | Used By |
+All metrics use hierarchical naming with `/` separators for organization in wandb.
+
+**Standard Training:**
+| Metric | Description |
+|--------|-------------|
+| `train/epoch` | Current epoch |
+| `train/batch_number` | Current batch number |
+| `train/samples_seen` | Total samples processed |
+| `train/loss` | MSE on training batch |
+
+**Meta-Learning (FOMAML, E2E-TTT):**
+| Metric | Description |
+|--------|-------------|
+| `train/batch_number` | Current meta-training step |
+| `train/meta_loss` | Query loss after inner adaptation |
+| `train/inner_loop_loss_avg` | Average loss during inner loop |
+| `train/query_loss_avg` | Average query loss per session |
+
+### Evaluation Metrics
+
+**Per-Dataset Metrics (Standard Training):**
+| Metric | Description |
+|--------|-------------|
+| `{dataset}/val/score` | 1 - (mse / copy_mse), higher is better |
+| `{dataset}/val/mse` | Validation MSE |
+| `{dataset}/val/mae` | Validation MAE |
+| `{dataset}/val/prediction_count` | Number of predictions |
+
+Example: `celegansflavell/val/score`, `zebrafishahrens_pc/val/mse`
+
+**Aggregated Metrics:**
+| Metric | Description | Methods |
 |--------|-------------|---------|
-| `TrainLoss` | MSE on training batch | Baseline |
-| `MetaLoss` | Query loss after inner adaptation | FOMAML, E2E-TTT |
-| `AvgInnerLoss` | Average loss during inner loop | FOMAML, E2E-TTT |
-| `AvgQueryLoss` | Average query loss per session | FOMAML, E2E-TTT |
+| `val/loss` | Overall validation loss | Standard |
+| `val/loss_before_adaptation` | Val loss without TTT adaptation | FOMAML, E2E-TTT |
+| `val/loss_after_adaptation` | Val loss after TTT adaptation | FOMAML, E2E-TTT |
+| `val/score_before_adaptation` | Val score without adaptation | FOMAML, E2E-TTT |
+| `val/score_after_adaptation` | Val score after adaptation | FOMAML, E2E-TTT |
 
-### Evaluation Metrics (Comparable Across Methods)
-
-| Metric | Description | Comparable? |
-|--------|-------------|-------------|
-| `TestLoss` | Validation MSE **without** adaptation | Yes |
-| `ValLoss` | Validation MSE **with** adaptation (FOMAML/E2E-TTT only) | N/A for baseline |
-| `val_mse` | Per-dataset validation MSE | Yes |
-| `val_mae` | Per-dataset validation MAE | Yes |
-| `{dataset}_val_score` | 1 - (val_mse / copy_mse), higher is better | Yes |
-| `PreAdaptScore` | val_score before adaptation (FOMAML/E2E-TTT) | Yes |
-| `PostAdaptScore` | val_score after adaptation (FOMAML/E2E-TTT) | Yes |
-
-**Note**: `{dataset}_val_score` is logged per-dataset (e.g., `celegansflavell_val_score`, `zebrafishahrens_pc_val_score`) for baseline training. For FOMAML/E2E-TTT, `PreAdaptScore` and `PostAdaptScore` provide the average val_score across sessions.
+**Test Metrics (Final Evaluation):**
+| Metric | Description |
+|--------|-------------|
+| `test/num_sessions_evaluated` | Sessions in test evaluation |
+| `test/loss_before_adaptation` | Test loss without adaptation |
+| `test/loss_after_adaptation` | Test loss after adaptation |
+| `test/adaptation_improvement_percent` | % improvement from adaptation |
 
 ### Key Comparison
 

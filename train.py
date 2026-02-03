@@ -13,7 +13,7 @@ from configs.config_global import LOG_LEVEL, NP_SEED, TCH_SEED, USE_CUDA, DATA_D
 from configs.configs import BaseConfig, SupervisedLearningBaseConfig, NeuralPredictionConfig, FOMAMLConfig
 from datasets.dataloader import DatasetIters, SessionDatasetIters
 from tasks.taskfunctions import TaskFunction
-from models.model_utils import model_init
+from models.model_utils import model_init, is_classical_baseline
 from utils.config_utils import load_config
 from utils.logger import Logger
 from utils.train_utils import (get_grad_norm, grad_clipping, task_init, log_complete)
@@ -125,6 +125,14 @@ def model_train(config: NeuralPredictionConfig):
     This function initializes the task, dataset, network, optimizer, and learning rate scheduler.
     It then trains the network and logs the performance.
     """
+
+    # Route to inference-only evaluation for zero-shot models (e.g., Chronos-2)
+    if config.model_type == 'Chronos2':
+        return inference_only_eval(config)
+
+    # Route to classical dynamics baseline training (DMD, SINDy, etc.)
+    if is_classical_baseline(config):
+        return classical_baseline_train(config)
 
     # Route to FOMAML training if configured
     if hasattr(config, 'training_mode') and config.training_mode == 'fomaml':
@@ -278,6 +286,154 @@ def model_eval(config: SupervisedLearningBaseConfig):
     logger.dump_tabular()
 
 
+def inference_only_eval(config: NeuralPredictionConfig):
+    """
+    Evaluation-only pipeline for pretrained zero-shot models like Chronos-2.
+    No training is performed - the model is evaluated directly on the validation set.
+    """
+    np.random.seed(NP_SEED + config.seed)
+    torch.manual_seed(TCH_SEED + config.seed)
+    random.seed(config.seed)
+    torch.hub.set_dir(osp.join(DATA_DIR, 'torch_hub'))
+
+    if USE_CUDA:
+        logging.info("Zero-shot evaluation with GPU")
+
+    # Initialize logger
+    logger = Logger(output_dir=config.save_path, exp_name=config.experiment_name, config=config)
+
+    # Initialize datasets (train_data needed for proper input_sizes/unit_types)
+    train_data = DatasetIters(config, 'train')
+    test_data = DatasetIters(config, 'val')
+    test_baseline_performance = test_data.get_baselines()
+
+    # Initialize task
+    task_func: TaskFunction = task_init(config, train_data.input_sizes)
+    task_func.mse_baseline['val'] = test_baseline_performance
+
+    # Initialize model (no training will occur)
+    net = model_init(config, train_data.input_sizes, train_data.unit_types)
+    param_count = sum(p.numel() for p in net.parameters() if p.requires_grad)
+    logging.info(f'Model: {config.model_type}, Total parameters: {param_count}')
+    logging.info(f'Zero-shot model - skipping training, evaluating directly')
+
+    # Evaluate performance
+    testloss_list = [float('inf')]
+    evaluate_performance(
+        net, config, test_data, task_func, logger,
+        testloss_list=testloss_list, i_b=0, train_loss=0.0
+    )
+    logger.dump_tabular()
+    logging.info("Zero-shot evaluation complete.")
+
+
+def classical_baseline_train(config: NeuralPredictionConfig):
+    """
+    Training pipeline for classical dynamics baselines (DMD, SINDy, etc.).
+
+    These methods use closed-form solutions rather than gradient descent:
+    1. Collect training data
+    2. Fit model using analytical solution (SVD, sparse regression, etc.)
+    3. Evaluate on validation set
+    """
+    total_train_time = 0.0
+    start_time = time.time()
+
+    np.random.seed(NP_SEED + config.seed)
+    torch.manual_seed(TCH_SEED + config.seed)
+    random.seed(config.seed)
+    torch.hub.set_dir(osp.join(DATA_DIR, 'torch_hub'))
+    train_start_time = datetime.now()
+
+    if USE_CUDA:
+        logging.info(f"Classical baseline training: {config.model_type}")
+
+    # Initialize logger
+    logger = Logger(output_dir=config.save_path, exp_name=config.experiment_name, config=config)
+
+    # Initialize datasets
+    train_data = DatasetIters(config, 'train')
+    test_data = DatasetIters(config, 'val')
+    test_baseline_performance = test_data.get_baselines()
+
+    # Initialize model
+    net = model_init(config, train_data.input_sizes, train_data.unit_types)
+    logging.info(f'Model: {config.model_type}')
+
+    # Initialize task function for evaluation
+    task_func: TaskFunction = task_init(config, train_data.input_sizes)
+    task_func.mse_baseline['val'] = test_baseline_performance
+
+    # Collect training data and fit model for each session
+    logging.info(f"Fitting {config.model_type} on training data...")
+    fit_start_time = time.time()
+
+    input_size_list = list(itertools.chain(*train_data.input_sizes))
+    n_sessions = len(input_size_list)
+
+    for session_idx in range(n_sessions):
+        session_chunks = []
+
+        # Collect data for this session from all batches
+        for loader in train_data.data_loaders:
+            for batch in loader:
+                batch_input, batch_target, batch_info = batch
+                batch = get_full_input(batch, 0, config, train_data.input_sizes)
+                batch_input, batch_target, batch_info = batch
+
+                inp = batch_input[session_idx]  # (L, B, D)
+                tar = batch_target[session_idx]  # (seq_length-1, B, D)
+
+                if inp.size(1) == 0:  # Empty batch for this session
+                    continue
+
+                # Convert to numpy and collect sequences
+                inp_np = inp.cpu().numpy()
+                tar_np = tar.cpu().numpy()
+
+                for b in range(inp_np.shape[1]):
+                    # Combine context and target to get full sequence
+                    context = inp_np[:, b, :]  # (context_length, D)
+                    target_end = tar_np[-config.pred_length:, b, :]  # (pred_length, D)
+                    full_seq = np.vstack([context, target_end])  # (seq_length, D)
+                    session_chunks.append(full_seq)
+
+        # Fit model on collected data
+        if len(session_chunks) > 0:
+            net.fit_session(session_chunks, session_idx)
+            logging.info(f"  Session {session_idx}: fitted on {len(session_chunks)} sequences")
+
+    net.mark_fitted()
+    fit_time = time.time() - fit_start_time
+    logging.info(f"Fitting completed in {fit_time:.2f}s")
+
+    # Log fitting info
+    logger.log_tabular('FitTime', fit_time)
+    logger.log_tabular('Epoch', 0)
+    logger.log_tabular('BatchNum', 0)
+    logger.log_tabular('DataNum', 0)
+    logger.log_tabular('TrainLoss', 0.0)
+
+    # Evaluate on validation set
+    testloss_list = [float('inf')]
+    evaluate_performance(
+        net, config, test_data, task_func, logger,
+        testloss_list=testloss_list, i_b=0, train_loss=0.0
+    )
+    logger.dump_tabular()
+
+    # Save fitted model
+    torch.save(net.state_dict(), osp.join(config.save_path, 'net_best.pth'))
+
+    total_train_time = time.time() - start_time
+    logging.info(f'Total time: {total_train_time:.2f}s')
+
+    log_complete(config.save_path, train_start_time)
+
+    if config.perform_test:
+        model_eval(config)
+
+
 def fomaml_train(config: FOMAMLConfig):
     """
     Meta-training using FOMAML (First-Order MAML).
@@ -305,6 +461,9 @@ def fomaml_train(config: FOMAMLConfig):
     # Initialize session-level dataset iterators
     train_data = SessionDatasetIters(config, 'train')
     val_data = SessionDatasetIters(config, 'val')
+
+    # Get baseline (copy) MSE for computing val_score
+    baseline_mse = val_data.get_baselines(key='session_copy_mse')
 
     logging.info(f"FOMAML training with {train_data.num_sessions} training sessions")
     logging.info(f"Meta batch size: {config.meta_batch_size}, Inner steps: {config.inner_steps}")
@@ -380,11 +539,14 @@ def fomaml_train(config: FOMAMLConfig):
             logger.log_tabular('AvgQueryLoss', stats['avg_query_loss'])
 
             # Evaluate on validation set with adaptation
-            val_metrics = evaluate_fomaml(net, trainer, val_data, config)
+            val_metrics = evaluate_fomaml(net, trainer, val_data, config, baseline_mse=baseline_mse)
             # TestLoss: comparable to baseline (no adaptation)
             logger.log_tabular('TestLoss', val_metrics['pre_adapt_loss'])
             # ValLoss: after adaptation (shows TTT benefit)
             logger.log_tabular('ValLoss', val_metrics['post_adapt_loss'])
+            # ValScore: 1 - (mse / copy_mse) - comparable metric to baselines
+            logger.log_tabular('PreAdaptScore', val_metrics['pre_adapt_score'])
+            logger.log_tabular('PostAdaptScore', val_metrics['post_adapt_score'])
             val_losses.append(val_metrics['post_adapt_loss'])
 
             # Save best model based on post-adaptation loss
@@ -415,6 +577,7 @@ def evaluate_fomaml(
     trainer,
     val_data: SessionDatasetIters,
     config: FOMAMLConfig,
+    baseline_mse: list = None,
 ) -> Dict[str, float]:
     """
     Evaluate FOMAML model on validation set with test-time adaptation.
@@ -427,10 +590,14 @@ def evaluate_fomaml(
     Returns dict with:
     - 'pre_adapt_loss': Average loss before adaptation (comparable to baseline TestLoss)
     - 'post_adapt_loss': Average loss after adaptation (TTT benefit)
+    - 'pre_adapt_score': val_score before adaptation (1 - mse/copy_mse)
+    - 'post_adapt_score': val_score after adaptation
     """
     net.eval()
     total_pre_loss = 0.0
     total_post_loss = 0.0
+    total_pre_score = 0.0
+    total_post_score = 0.0
     num_sessions = 0
 
     for session_id in range(val_data.num_sessions):
@@ -456,14 +623,29 @@ def evaluate_fomaml(
         )
         total_pre_loss += result['pre_adapt_loss']
         total_post_loss += result['post_adapt_loss']
+
+        # Compute val_score if baseline_mse is provided
+        if baseline_mse is not None and session_id < len(baseline_mse):
+            copy_mse = baseline_mse[session_id]
+            if copy_mse > 0:
+                total_pre_score += 1 - result['pre_adapt_loss'] / copy_mse
+                total_post_score += 1 - result['post_adapt_loss'] / copy_mse
+
         num_sessions += 1
 
     if num_sessions == 0:
-        return {'pre_adapt_loss': float('inf'), 'post_adapt_loss': float('inf')}
+        return {
+            'pre_adapt_loss': float('inf'),
+            'post_adapt_loss': float('inf'),
+            'pre_adapt_score': 0.0,
+            'post_adapt_score': 0.0,
+        }
 
     return {
         'pre_adapt_loss': total_pre_loss / num_sessions,
         'post_adapt_loss': total_post_loss / num_sessions,
+        'pre_adapt_score': total_pre_score / num_sessions if baseline_mse else 0.0,
+        'post_adapt_score': total_post_score / num_sessions if baseline_mse else 0.0,
     }
 
 
@@ -563,6 +745,9 @@ def e2e_ttt_train(config):
     train_data = SessionDatasetIters(config, 'train')
     val_data = SessionDatasetIters(config, 'val')
 
+    # Get baseline (copy) MSE for computing val_score
+    baseline_mse = val_data.get_baselines(key='session_copy_mse')
+
     logging.info(f"E2E-TTT training with {train_data.num_sessions} training sessions")
     logging.info(f"Meta batch size: {config.meta_batch_size}, Inner steps: {config.inner_steps}")
     logging.info(f"Using second-order gradients (create_graph=True)")
@@ -631,11 +816,14 @@ def e2e_ttt_train(config):
             logger.log_tabular('AvgQueryLoss', stats['avg_query_loss'])
 
             # Evaluate on validation set with adaptation
-            val_metrics = evaluate_e2e_ttt(net, trainer, val_data, config)
+            val_metrics = evaluate_e2e_ttt(net, trainer, val_data, config, baseline_mse=baseline_mse)
             # TestLoss: comparable to baseline (no adaptation)
             logger.log_tabular('TestLoss', val_metrics['pre_adapt_loss'])
             # ValLoss: after adaptation (shows TTT benefit)
             logger.log_tabular('ValLoss', val_metrics['post_adapt_loss'])
+            # ValScore: 1 - (mse / copy_mse) - comparable metric to baselines
+            logger.log_tabular('PreAdaptScore', val_metrics['pre_adapt_score'])
+            logger.log_tabular('PostAdaptScore', val_metrics['post_adapt_score'])
             val_losses.append(val_metrics['post_adapt_loss'])
 
             # Save best model based on post-adaptation loss
@@ -666,6 +854,7 @@ def evaluate_e2e_ttt(
     trainer,
     val_data: SessionDatasetIters,
     config,
+    baseline_mse: list = None,
 ) -> Dict[str, float]:
     """
     Evaluate E2E-TTT model on validation set with test-time adaptation.
@@ -673,10 +862,14 @@ def evaluate_e2e_ttt(
     Returns dict with:
     - 'pre_adapt_loss': Average loss before adaptation (comparable to baseline TestLoss)
     - 'post_adapt_loss': Average loss after adaptation (TTT benefit)
+    - 'pre_adapt_score': val_score before adaptation (1 - mse/copy_mse)
+    - 'post_adapt_score': val_score after adaptation
     """
     net.eval()
     total_pre_loss = 0.0
     total_post_loss = 0.0
+    total_pre_score = 0.0
+    total_post_score = 0.0
     num_sessions = 0
 
     for session_id in range(val_data.num_sessions):
@@ -702,14 +895,29 @@ def evaluate_e2e_ttt(
         )
         total_pre_loss += result['pre_adapt_loss']
         total_post_loss += result['post_adapt_loss']
+
+        # Compute val_score if baseline_mse is provided
+        if baseline_mse is not None and session_id < len(baseline_mse):
+            copy_mse = baseline_mse[session_id]
+            if copy_mse > 0:
+                total_pre_score += 1 - result['pre_adapt_loss'] / copy_mse
+                total_post_score += 1 - result['post_adapt_loss'] / copy_mse
+
         num_sessions += 1
 
     if num_sessions == 0:
-        return {'pre_adapt_loss': float('inf'), 'post_adapt_loss': float('inf')}
+        return {
+            'pre_adapt_loss': float('inf'),
+            'post_adapt_loss': float('inf'),
+            'pre_adapt_score': 0.0,
+            'post_adapt_score': 0.0,
+        }
 
     return {
         'pre_adapt_loss': total_pre_loss / num_sessions,
         'post_adapt_loss': total_post_loss / num_sessions,
+        'pre_adapt_score': total_pre_score / num_sessions if baseline_mse else 0.0,
+        'post_adapt_score': total_post_score / num_sessions if baseline_mse else 0.0,
     }
 
 

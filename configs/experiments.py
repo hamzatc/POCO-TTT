@@ -1241,3 +1241,509 @@ def poco_baseline():
     configs = configure_models(configs)
     configs = configure_dataset(configs)
     return configs
+
+
+# ============== Single-Session Experiments ==============
+
+# Single-session model list (models that work on individual sessions)
+single_session_baseline_list = ['POCO', 'NLinear', 'MLP', 'TexFilter', 'DLinear', 'TCN']
+
+
+def single_session_celegans_flavell():
+    """Single-session baselines on C. elegans Flavell dataset.
+
+    Trains and evaluates each model on individual sessions (no cross-session learning).
+    This provides a baseline for how well models can predict within a single recording.
+    """
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'single_session_celegans_flavell'
+    config.max_batch = 5000
+    config.log_every = 100
+    config.save_every = 1000
+
+    config_ranges = OrderedDict()
+    # Use a subset of sessions for faster experiments (10 sessions)
+    config_ranges['dataset_label'] = [f'celegansflavell-{session}' for session in range(10)]
+    config_ranges['model_label'] = single_session_baseline_list
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def single_session_zebrafish_ahrens():
+    """Single-session baselines on Zebrafish Ahrens dataset.
+
+    Trains and evaluates each model on individual sessions.
+    """
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'single_session_zebrafish_ahrens'
+    config.max_batch = 5000
+    config.log_every = 100
+    config.save_every = 1000
+
+    config_ranges = OrderedDict()
+    # All 7 available zebrafish sessions
+    config_ranges['dataset_label'] = [f'zebrafishahrens_pc-{session}' for session in range(7)]
+    config_ranges['model_label'] = single_session_baseline_list
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def single_session_all():
+    """Single-session baselines on all datasets.
+
+    Comprehensive single-session evaluation across all available datasets.
+    """
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'single_session_all'
+    config.max_batch = 5000
+    config.log_every = 100
+    config.save_every = 1000
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = (
+        [f'celegansflavell-{session}' for session in range(10)] +  # 10 C. elegans sessions
+        [f'zebrafishahrens_pc-{session}' for session in range(7)]   # 7 zebrafish sessions
+    )
+    config_ranges['model_label'] = single_session_baseline_list
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+# ============== Paper Baselines (Multi-Session Models) ==============
+
+# Baseline models from the POCO paper for comparison
+paper_baseline_models = ['NLinear', 'MLP_L', 'TexFilter', 'NetFormer', 'Latent_PLRNN']
+
+
+def paper_baselines():
+    """Run all paper baselines for comparison with POCO and TTT methods.
+
+    This runs NLinear, MLP_L, TexFilter, NetFormer, and Latent_PLRNN on
+    the same datasets used for POCO-TTT experiments.
+    """
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'paper_baselines'
+
+    config.max_batch = 5000
+    config.log_every = 100
+    config.save_every = 1000
+
+    config_ranges = OrderedDict()
+    # Same datasets as poco_baseline, fomaml_multi_species, e2e_ttt_multi_species
+    config_ranges['dataset_label'] = [
+        'celegansflavell',
+        'zebrafishahrens_pc',
+    ]
+    config_ranges['model_label'] = paper_baseline_models
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def nlinear_baseline():
+    """NLinear baseline for quick comparison."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'nlinear_baseline'
+
+    config.max_batch = 5000
+    config.log_every = 100
+    config.save_every = 1000
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = [
+        'celegansflavell',
+        'zebrafishahrens_pc',
+    ]
+    config_ranges['model_label'] = ['NLinear', ]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def texfilter_baseline():
+    """TexFilter baseline for comparison."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'texfilter_baseline'
+
+    config.max_batch = 5000
+    config.log_every = 100
+    config.save_every = 1000
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = [
+        'celegansflavell',
+        'zebrafishahrens_pc',
+    ]
+    config_ranges['model_label'] = ['TexFilter', ]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def mlp_baseline():
+    """MLP_L (latent MLP) baseline for comparison."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'mlp_baseline'
+
+    config.max_batch = 5000
+    config.log_every = 100
+    config.save_every = 1000
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = [
+        'celegansflavell',
+        'zebrafishahrens_pc',
+    ]
+    config_ranges['model_label'] = ['MLP_L', ]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+# ============== Chronos-2 (Zero-Shot Foundation Model) Experiments ==============
+
+def chronos2_zeroshot():
+    """Chronos-2 zero-shot evaluation on key datasets.
+
+    This evaluates the pretrained Chronos-2 time series foundation model
+    without any training. Each neuron is treated as a separate univariate
+    time series, enabling cross-learning via Chronos-2's group attention.
+    """
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'chronos2_zeroshot'
+    # Note: max_batch doesn't matter for zero-shot models (no training occurs)
+
+    config_ranges = OrderedDict()
+    # Use same datasets as other experiments for fair comparison
+    config_ranges['dataset_label'] = [
+        'celegansflavell',
+        'zebrafishahrens_pc',
+    ]
+    config_ranges['model_label'] = ['Chronos2']
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=1)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def chronos2_zeroshot_small():
+    """Chronos-2-small (28M params) zero-shot evaluation.
+
+    Uses the smaller variant of Chronos-2 for faster inference.
+    """
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'chronos2_zeroshot_small'
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = [
+        'celegansflavell',
+        'zebrafishahrens_pc',
+    ]
+    config_ranges['model_label'] = ['Chronos2_small']
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=1)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def compare_chronos2_baseline():
+    """Compare Chronos-2 zero-shot vs trained baselines.
+
+    This experiment compares the zero-shot Chronos-2 foundation model
+    against trained models (NLinear, POCO, MLP) to assess the benefit
+    of domain-specific training vs pretrained foundation models.
+    """
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'compare_chronos2'
+
+    config_ranges = OrderedDict()
+    # Same datasets as other experiments for fair comparison
+    config_ranges['dataset_label'] = ['celegansflavell', 'zebrafishahrens_pc']
+    config_ranges['model_label'] = ['Chronos2', 'NLinear', 'POCO', 'MLP']
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def chronos2_single_session():
+    """Chronos-2 zero-shot on individual sessions for detailed analysis."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'chronos2_single_session'
+    config.max_batch = 1  # Inference only
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = (
+        [f'zebrafish_pc-{session}' for session in range(19)] +
+        [f'zebrafishahrens_pc-{session}' for session in range(15)] +
+        [f'celegansflavell-{session}' for session in range(40)] +
+        [f'mice-{session}' for session in range(12)]
+    )
+    config_ranges['model_label'] = ['Chronos2']
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=1)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+# ============== Classical Dynamical Systems Baselines ==============
+
+# Classical baseline model list
+classical_baseline_list = ['DMD', 'HODMD', 'EDMD', 'KernelEDMD', 'SINDy']
+
+
+def dmd_test():
+    """Test DMD baseline on a single dataset."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'dmd_test'
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = ['celegansflavell-0']
+    config_ranges['model_label'] = ['DMD']
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=1)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def compare_classical_baselines():
+    """Compare all classical dynamical systems baselines (DMD, EDMD, SINDy)."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'compare_classical_baselines'
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = [
+        'zebrafish_pc', 'zebrafishahrens_pc', 'celegansflavell', 'celegans'
+    ]
+    config_ranges['model_label'] = classical_baseline_list
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def compare_classical_baselines_single_session():
+    """Compare classical baselines on single-session data."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'compare_classical_baselines_single_session'
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = (
+        [f'zebrafish_pc-{session}' for session in range(19)] +
+        [f'zebrafishahrens_pc-{session}' for session in range(15)] +
+        [f'celegansflavell-{session}' for session in range(40)]
+    )
+    config_ranges['model_label'] = classical_baseline_list
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=1)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def compare_dmd_vs_poco():
+    """Compare DMD variants against POCO on multiple datasets."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'compare_dmd_vs_poco'
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = [
+        'zebrafish_pc', 'zebrafishahrens_pc', 'celegansflavell'
+    ]
+    config_ranges['model_label'] = ['DMD', 'HODMD', 'KernelEDMD', 'POCO', 'NLinear']
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def compare_dmd_svd_rank():
+    """Compare DMD with different SVD truncation ranks."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'compare_dmd_svd_rank'
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = ['zebrafish_pc', 'celegansflavell']
+    config_ranges['model_label'] = ['DMD']
+    config_ranges['dmd_svd_rank'] = [10, 25, 50, 100, 200]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def compare_sindy_parameters():
+    """Compare SINDy with different sparsity thresholds and polynomial degrees."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'compare_sindy_parameters'
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = ['zebrafish_pc', 'celegansflavell']
+    config_ranges['model_label'] = ['SINDy']
+    config_ranges['sindy_threshold'] = [0.01, 0.05, 0.1, 0.5]
+    config_ranges['sindy_poly_degree'] = [1, 2]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def compare_prediction_horizons():
+    """Compare methods across different prediction horizons."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'compare_prediction_horizons'
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = ['zebrafish_pc', 'celegansflavell']
+    config_ranges['model_label'] = ['DMD', 'KernelEDMD', 'POCO', 'NLinear']
+    config_ranges['pred_length'] = [5, 16, 32, 50]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+
+    # Update seq_length to accommodate different pred_lengths
+    for seed, config_list in configs.items():
+        for cfg in config_list:
+            cfg.seq_length = cfg.pred_length + 48  # Keep context at 48
+
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+# ============== Koopman Autoencoder Experiments ==============
+
+def koopman_ae_test():
+    """Test Koopman Autoencoder on a single dataset."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'koopman_ae_test'
+    config.max_batch = 2000
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = ['celegansflavell-0']
+    config_ranges['model_label'] = ['KoopmanAE']
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=1)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def compare_koopman_ae():
+    """Compare Koopman AE against other methods."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'compare_koopman_ae'
+    config.max_batch = 5000
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = ['zebrafish_pc', 'celegansflavell']
+    config_ranges['model_label'] = ['KoopmanAE', 'KernelEDMD', 'POCO', 'NLinear']
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def koopman_ae_latent_dim():
+    """Compare Koopman AE with different latent dimensions."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'koopman_ae_latent_dim'
+    config.max_batch = 5000
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = ['zebrafish_pc', 'celegansflavell']
+    config_ranges['model_label'] = ['KoopmanAE']
+    config_ranges['koopman_latent_dim'] = [16, 32, 64, 128, 256]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def koopman_ae_loss_weights():
+    """Compare Koopman AE with different loss weight configurations."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'koopman_ae_loss_weights'
+    config.max_batch = 5000
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = ['zebrafish_pc', 'celegansflavell']
+    config_ranges['model_label'] = ['KoopmanAE']
+    config_ranges['koopman_lambda_linear'] = [0.0, 0.01, 0.1, 1.0]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def compare_all_dynamical_methods():
+    """Comprehensive comparison of all dynamical systems methods.
+
+    Compares classical (DMD, EDMD, SINDy), Koopman AE, and neural (POCO, NLinear).
+    """
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'compare_all_dynamical_methods'
+    config.max_batch = 5000
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = ['zebrafish_pc', 'celegansflavell']
+    config_ranges['model_label'] = [
+        'DMD', 'HODMD', 'KernelEDMD', 'SINDy',  # Classical
+        'KoopmanAE',  # Deep Koopman
+        'POCO', 'NLinear',  # Neural baselines
+    ]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs
+
+
+def compare_dynamical_horizons():
+    """Compare dynamical systems methods across prediction horizons."""
+    config = NeuralPredictionConfig()
+    config.experiment_name = 'compare_dynamical_horizons'
+
+    config_ranges = OrderedDict()
+    config_ranges['dataset_label'] = ['zebrafish_pc', 'celegansflavell']
+    config_ranges['model_label'] = ['DMD', 'KernelEDMD', 'KoopmanAE', 'POCO', 'NLinear']
+    config_ranges['pred_length'] = [5, 16, 32, 50]
+
+    configs = vary_config(config, config_ranges, mode='combinatorial', num_seed=3)
+
+    # Update seq_length to accommodate different pred_lengths
+    for seed, config_list in configs.items():
+        for cfg in config_list:
+            cfg.seq_length = cfg.pred_length + 48  # Keep context at 48
+
+    configs = configure_models(configs)
+    configs = configure_dataset(configs)
+    return configs

@@ -106,16 +106,20 @@ class Logger:
                 elif isinstance(config, dict):
                     config_dict = config
 
+            # Generate standardized run name
+            run_name = self._generate_run_name(exp_name, config_dict)
+
             try:
                 self.wandb_run = wandb.init(
                     project=project,
                     entity=entity,
-                    name=exp_name,
+                    name=run_name,
+                    group=exp_name,  # Group runs by experiment name
                     config=config_dict,
                     dir=output_dir,
                     reinit=True,
                 )
-                print(colorize(f"Logging to W&B: {project}/{exp_name}", 'cyan', bold=True))
+                print(colorize(f"Logging to W&B: {project}/{run_name}", 'cyan', bold=True))
             except Exception as e:
                 print(colorize(f"Failed to initialize W&B: {e}", 'yellow'))
                 self.use_wandb = False
@@ -183,3 +187,72 @@ class Logger:
         if self.use_wandb and self.wandb_run is not None:
             wandb.finish()
             self.wandb_run = None
+
+    def _generate_run_name(self, exp_name: str, config_dict: dict) -> str:
+        """
+        Generate a standardized run name for wandb.
+
+        Naming schema: {mode}_{model}_{dataset}_s{seed}
+
+        Where:
+        - mode: Training mode (standard/fomaml/e2e_ttt/single)
+        - model: Model label (POCO, NLinear, MLP, etc.)
+        - dataset: Dataset label (celegansflavell, zebrafishahrens_pc, etc.)
+        - seed: Random seed number
+
+        Examples:
+        - standard_POCO_celegansflavell_s0
+        - fomaml_POCO_celegansflavell_s0
+        - e2e_ttt_POCO_zebrafishahrens_pc_s1
+        - single_POCO_celegansflavell-0_s0
+        """
+        if config_dict is None:
+            return exp_name
+
+        # Extract components from config
+        model = config_dict.get('model_label', 'unknown')
+        dataset = config_dict.get('dataset_label', 'unknown')
+        seed = config_dict.get('seed', 0)
+        training_mode = config_dict.get('training_mode', 'standard')
+
+        # Handle list datasets (multi-session training)
+        if isinstance(dataset, list):
+            if len(dataset) == 1:
+                dataset = dataset[0]
+            else:
+                # Abbreviate multiple datasets
+                dataset = '+'.join([d.split('_')[0][:4] for d in dataset[:3]])
+                if len(config_dict.get('dataset_label', [])) > 3:
+                    dataset += '+...'
+
+        # Determine mode from experiment name if not in config
+        if training_mode == 'standard':
+            if 'fomaml' in exp_name.lower():
+                training_mode = 'fomaml'
+            elif 'e2e_ttt' in exp_name.lower():
+                training_mode = 'e2e_ttt'
+            elif 'single_session' in exp_name.lower() or '-' in str(dataset):
+                training_mode = 'single'
+
+        # Shorten mode names for readability
+        mode_short = {
+            'standard': 'std',
+            'fomaml': 'fom',
+            'e2e_ttt': 'e2e',
+            'single': 'ss',
+        }.get(training_mode, training_mode[:3])
+
+        # Shorten dataset names for readability
+        dataset_short = str(dataset)
+        dataset_short = dataset_short.replace('celegansflavell', 'cef')
+        dataset_short = dataset_short.replace('zebrafishahrens_pc', 'zfa_pc')
+        dataset_short = dataset_short.replace('zebrafishahrens', 'zfa')
+        dataset_short = dataset_short.replace('zebrafish_pc', 'zf_pc')
+        dataset_short = dataset_short.replace('zebrafish', 'zf')
+        dataset_short = dataset_short.replace('mice_pc', 'mice_pc')
+        dataset_short = dataset_short.replace('celegans', 'cel')
+
+        # Build run name
+        run_name = f"{mode_short}_{model}_{dataset_short}_s{seed}"
+
+        return run_name

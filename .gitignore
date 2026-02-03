@@ -1,7 +1,8 @@
 **/__pycache__
 data/*
 backup/*
-sbatch/*
+sbatch/logs/*
+!sbatch/*.sh
 experiments/*
 zapbench_scripts/experiments/*
 zapbench_scripts/old_experiments/*

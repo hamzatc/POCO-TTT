@@ -311,31 +311,27 @@ All experiments log to:
 All wandb runs follow a standardized naming convention:
 
 ```
-{mode}_{model}_{dataset}_s{seed}
+{training_mode}_{model}_{dataset}_seed{N}
 ```
 
 | Component | Description | Examples |
 |-----------|-------------|----------|
-| `mode` | Training mode | `std` (standard), `fom` (FOMAML), `e2e` (E2E-TTT), `ss` (single-session) |
-| `model` | Model architecture | `POCO`, `NLinear`, `MLP`, `TexFilter`, etc. |
-| `dataset` | Dataset (abbreviated) | `cef` (celegansflavell), `zfa_pc` (zebrafishahrens_pc), `zf_pc` (zebrafish_pc) |
-| `seed` | Random seed | `s0`, `s1`, `s2` |
-
-**Dataset Abbreviations:**
-| Full Name | Abbreviation |
-|-----------|--------------|
-| `celegansflavell` | `cef` |
-| `zebrafishahrens_pc` | `zfa_pc` |
-| `zebrafishahrens` | `zfa` |
-| `zebrafish_pc` | `zf_pc` |
-| `celegans` | `cel` |
-| `mice_pc` | `mice_pc` |
+| `training_mode` | Training mode | `standard`, `fomaml`, `e2e_ttt`, `single_session` |
+| `model` | Model architecture | `POCO`, `NLinear`, `MLP`, `TexFilter`, `NetFormer`, etc. |
+| `dataset` | Full dataset label | `celegansflavell`, `zebrafishahrens_pc`, `celegansflavell-0` |
+| `seed` | Random seed | `seed0`, `seed1`, `seed2` |
 
 **Example Run Names:**
-- `std_POCO_cef_s0` - Standard POCO training on C. elegans Flavell, seed 0
-- `fom_POCO_cef_s1` - FOMAML training on C. elegans Flavell, seed 1
-- `e2e_POCO_zfa_pc_s0` - E2E-TTT training on zebrafish Ahrens (PC), seed 0
-- `ss_NLinear_cef-0_s0` - Single-session NLinear on session 0, seed 0
+- `standard_POCO_celegansflavell_seed0` - Standard POCO training on C. elegans Flavell
+- `fomaml_POCO_celegansflavell_seed1` - FOMAML meta-learning on C. elegans Flavell
+- `e2e_ttt_POCO_zebrafishahrens_pc_seed0` - E2E-TTT training on zebrafish Ahrens (PC)
+- `single_session_NLinear_celegansflavell-0_seed0` - Single-session NLinear on session 0
+- `standard_TexFilter_celegansflavell+zebrafishahrens_pc_seed2` - Multi-dataset training
+
+**Multi-Dataset Naming:**
+When training on multiple datasets:
+- 2 datasets: `dataset1+dataset2` (e.g., `celegansflavell+zebrafishahrens_pc`)
+- 3+ datasets: `dataset1+dataset2+Nmore` (e.g., `celegansflavell+zebrafishahrens_pc+4more`)
 
 **Run Grouping:**
 Runs are automatically grouped by `experiment_name` in wandb, making it easy to compare different configurations within the same experiment.

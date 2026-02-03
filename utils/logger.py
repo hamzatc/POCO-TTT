@@ -192,19 +192,19 @@ class Logger:
         """
         Generate a standardized run name for wandb.
 
-        Naming schema: {mode}_{model}_{dataset}_s{seed}
+        Naming schema: {mode}_{model}_{dataset}_seed{N}
 
         Where:
-        - mode: Training mode (standard/fomaml/e2e_ttt/single)
+        - mode: Training mode (standard/fomaml/e2e_ttt/single_session)
         - model: Model label (POCO, NLinear, MLP, etc.)
-        - dataset: Dataset label (celegansflavell, zebrafishahrens_pc, etc.)
+        - dataset: Full dataset label (celegansflavell, zebrafishahrens_pc, etc.)
         - seed: Random seed number
 
         Examples:
-        - standard_POCO_celegansflavell_s0
-        - fomaml_POCO_celegansflavell_s0
-        - e2e_ttt_POCO_zebrafishahrens_pc_s1
-        - single_POCO_celegansflavell-0_s0
+        - standard_POCO_celegansflavell_seed0
+        - fomaml_POCO_celegansflavell_seed1
+        - e2e_ttt_POCO_zebrafishahrens_pc_seed0
+        - single_session_NLinear_celegansflavell-0_seed0
         """
         if config_dict is None:
             return exp_name
@@ -219,11 +219,12 @@ class Logger:
         if isinstance(dataset, list):
             if len(dataset) == 1:
                 dataset = dataset[0]
+            elif len(dataset) == 2:
+                # Join two datasets with +
+                dataset = f"{dataset[0]}+{dataset[1]}"
             else:
-                # Abbreviate multiple datasets
-                dataset = '+'.join([d.split('_')[0][:4] for d in dataset[:3]])
-                if len(config_dict.get('dataset_label', [])) > 3:
-                    dataset += '+...'
+                # For 3+ datasets, show first two and count
+                dataset = f"{dataset[0]}+{dataset[1]}+{len(dataset)-2}more"
 
         # Determine mode from experiment name if not in config
         if training_mode == 'standard':
@@ -231,28 +232,10 @@ class Logger:
                 training_mode = 'fomaml'
             elif 'e2e_ttt' in exp_name.lower():
                 training_mode = 'e2e_ttt'
-            elif 'single_session' in exp_name.lower() or '-' in str(dataset):
-                training_mode = 'single'
+            elif 'single_session' in exp_name.lower() or ('-' in str(dataset) and not '_pc' in str(dataset).split('-')[0]):
+                training_mode = 'single_session'
 
-        # Shorten mode names for readability
-        mode_short = {
-            'standard': 'std',
-            'fomaml': 'fom',
-            'e2e_ttt': 'e2e',
-            'single': 'ss',
-        }.get(training_mode, training_mode[:3])
-
-        # Shorten dataset names for readability
-        dataset_short = str(dataset)
-        dataset_short = dataset_short.replace('celegansflavell', 'cef')
-        dataset_short = dataset_short.replace('zebrafishahrens_pc', 'zfa_pc')
-        dataset_short = dataset_short.replace('zebrafishahrens', 'zfa')
-        dataset_short = dataset_short.replace('zebrafish_pc', 'zf_pc')
-        dataset_short = dataset_short.replace('zebrafish', 'zf')
-        dataset_short = dataset_short.replace('mice_pc', 'mice_pc')
-        dataset_short = dataset_short.replace('celegans', 'cel')
-
-        # Build run name
-        run_name = f"{mode_short}_{model}_{dataset_short}_s{seed}"
+        # Build run name with full descriptive names
+        run_name = f"{training_mode}_{model}_{dataset}_seed{seed}"
 
         return run_name
